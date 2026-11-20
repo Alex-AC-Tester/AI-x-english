@@ -14,9 +14,10 @@ import * as words from './views/words.js';
 import * as learn from './views/learn.js';
 import * as quiz from './views/quiz.js';
 import * as dashboard from './views/dashboard.js';
+import * as profile from './views/profile.js';
 import * as settings from './views/settings.js';
 
-const VIEWS = { home, reader, history, lookup, import: importView, words, learn, quiz, dashboard, settings };
+const VIEWS = { home, reader, history, lookup, import: importView, words, learn, quiz, dashboard, profile, settings };
 // tab: true 的项出现在移动端底栏（其余仍需在侧栏抽屉中访问）
 const NAV = [
   { name: 'home', label: '今日', icon: 'home', tab: true },
@@ -27,6 +28,7 @@ const NAV = [
   { name: 'learn', label: '背词', icon: 'target' },
   { name: 'quiz', label: '试卷', icon: 'clipboard', tab: true },
   { name: 'dashboard', label: '看板', icon: 'chart', tab: true },
+  { name: 'profile', label: '画像', icon: 'user' },
   { name: 'settings', label: '设置', icon: 'gear' }
 ];
 

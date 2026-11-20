@@ -6,6 +6,7 @@ import { builtinLookup } from '../gaokao.js';
 import { icon, esc, toast, modal, confirmDialog, pickFile, pickFiles, readAsDataURL, dateKey } from '../ui.js';
 import { vizModalBody, mountVizToggles } from '../viz.js';
 import { nlpSentence } from '../nlp.js';
+import { detectHardSentences, articleHash } from '../hardsent.js';
 import { parseEbookFile, renderPdfToImages, EBOOK_ACCEPT, FORMAT_LABELS, countWords as countEbookWords } from '../ebook.js';
 import { go, refresh } from '../router.js';
 
@@ -19,6 +20,7 @@ let importDraft = { title: '', text: '', source: '', photos: [], fileName: '', h
 let showImport = false;
 let ebookBusy = false;
 let ebookProgress = '';
+let hardBusy = false;
 
 /**
  * 当前的精读对话会话
@@ -53,6 +55,55 @@ function sentenceIndex(struct, paraIdx, sentIdx) {
   let n = 0;
   for (let p = 0; p < paraIdx; p++) n += struct[p].sentences.length;
   return n + sentIdx;
+}
+
+/* ---------- 长难句识别（本地 NLP） ---------- */
+
+/** 文章文本变了、或还没有结果时，重新挑出 5 个长难句 */
+async function ensureHardSentences(articleId, { force = false } = {}) {
+  const a = getArticle(articleId);
+  if (!a) return;
+  const hash = articleHash(a.text);
+  if (!force && Array.isArray(a.hardSentences) && a.hardHash === hash) return;
+  if (hardBusy) return;
+  hardBusy = true;
+  try {
+    const sentences = flattenSentences(splitArticle(a.text)).map((text, index) => ({ index, text }));
+    const r = await detectHardSentences(sentences, a.text, 5);
+    patchArticle(articleId, {
+      hardSentences: r.items,
+      hardHash: hash,
+      hardAt: r.at,
+      hardEngine: r.engine
+    });
+    if (mode === 'read' && currentId === articleId) refreshKeep();
+  } catch (err) {
+    console.warn('[hard sentences]', err);
+  } finally {
+    hardBusy = false;
+  }
+}
+
+function renderHardCard(a, list) {
+  const engine = a.hardEngine === 'heuristic' ? '文本启发式（NLP 未就绪）' : (a.hardEngine || '本地 NLP');
+  return `<section class="card mb16">
+    <div class="card-head">
+      <div><h2>长难句 <span class="pill">${list.length || 5}</span></h2>
+        <div class="sub">${esc(engine)} · 按长度、从句层级与嵌套深度挑选，正文中紫色下划线标出</div></div>
+      <button class="btn btn-sm btn-ghost" data-action="redetectHard" ${hardBusy ? 'disabled' : ''}>
+        ${hardBusy ? '<span class="loading"></span>' : '重新识别'}</button>
+    </div>
+    ${list.length ? `<div class="hard-list">${list.map((h) => `
+      <button type="button" class="hard-item" data-action="hardItem" data-i="${h.index}">
+        <span class="hard-no">${h.index + 1}</span>
+        <span class="hard-body">
+          <span class="hard-reason">${esc(h.reason || '')}</span>
+          <span class="hard-text">${esc(String(h.text || '').slice(0, 120))}${String(h.text || '').length > 120 ? '…' : ''}</span>
+        </span>
+        <span class="hard-go">${icon('arrowRight', 14)}</span>
+      </button>`).join('')}</div>`
+      : `<div class="empty" style="padding:22px 0">${icon('sparkles', 26)}<p>${hardBusy ? '本地 NLP 正在识别…' : '还没有识别结果，点右上角重新识别'}</p></div>`}
+  </section>`;
 }
 
 /* ---------- 渲染：列表 ---------- */
@@ -169,6 +220,8 @@ function renderRead() {
   if (!a) { mode = 'list'; return renderList(); }
   const struct = splitArticle(a.text);
   const sentences = flattenSentences(struct);
+  const hardList = Array.isArray(a.hardSentences) ? a.hardSentences : [];
+  const hardMap = new Map(hardList.map((h) => [h.index, h]));
   return `
     <div class="row" style="margin-bottom:14px">
       <button class="btn btn-sm" data-action="backList">${icon('arrowLeft', 14)} 文章列表</button>
@@ -187,7 +240,9 @@ function renderRead() {
             <p><span class="para-num">¶${pi + 1}</span>${p.sentences.map((s) => {
               const idx = sentenceIndex(struct, pi, p.sentences.indexOf(s));
               const has = a.sentences && a.sentences[idx];
-              return `<span class="sentence ${idx === activeIndex ? 'active' : ''} ${has ? 'explained' : ''}" data-si="${idx}" title="点这句，先自己翻，AI 再给提示">${esc(s)}</span>`;
+              const hard = hardMap.get(idx);
+              const tip = hard ? `长难句 · ${hard.reason || ''}｜点这句开始精读` : '点这句，先自己翻，AI 再给提示';
+              return `<span class="sentence ${idx === activeIndex ? 'active' : ''} ${has ? 'explained' : ''} ${hard ? 'hard-sentence' : ''}" data-si="${idx}" title="${esc(tip)}">${esc(s)}</span>`;
             }).join(' ')}</p>`).join('')}
         </article>
         <div class="selection-bar" id="selBar">
@@ -195,10 +250,11 @@ function renderRead() {
           ${selectionText ? `<button class="btn btn-sm" data-action="translateSel">${icon('chat', 13)} 翻译选中</button>` : ''}
           ${selectionText ? `<button class="btn btn-sm btn-primary" data-action="explainSel">${icon('sparkles', 13)} 精读选中</button>` : ''}
         </div>
-        <div class="tiny muted mt8">共 ${sentences.length} 句 · ${countWordsEn(a.text)} 词 · 点句子先自己翻译，AI 看着你的译文给提示</div>
+        <div class="tiny muted mt8">共 ${sentences.length} 句 · ${countWordsEn(a.text)} 词 · 紫色下划线是本地 NLP 挑出的长难句</div>
       </div>
 
       <div>
+        ${renderHardCard(a, hardList)}
         ${renderExplanationPanel()}
         ${a.analysis ? renderAnalysis(a.analysis) : ''}
       </div>
@@ -372,6 +428,7 @@ function saveNewArticle({ title, text, source }) {
   currentId = a.id; mode = 'read'; activeIndex = -1; coach = null; selectionText = '';
   showImport = false; importDraft = { title: '', text: '', source: '', photos: [], fileName: '', hint: '', ebook: null, ebookFile: null };
   refreshMe();
+  ensureHardSentences(a.id);
 }
 
 function toWordEntries(words, sourceType) {
@@ -626,13 +683,15 @@ export function mount() {
     const btn = e.target.closest('[data-action]');
     if (!btn) {
       const card = e.target.closest('[data-article]');
-      if (card) { currentId = card.dataset.article; mode = 'read'; activeIndex = -1; coach = null; selectionText = ''; refreshMe(); }
+      if (card) { currentId = card.dataset.article; mode = 'read'; activeIndex = -1; coach = null; selectionText = ''; refreshMe(); ensureHardSentences(currentId); }
       return;
     }
     const a = btn.dataset.action;
 
     if (a === 'newImport') { collectImport(); showImport = true; refreshMe(); return; }
     if (a === 'goHistory') { go('history'); return; }
+    if (a === 'hardItem') { openCoach(Number(btn.dataset.i)); return; }
+    if (a === 'redetectHard') { await ensureHardSentences(currentId, { force: true }); toast('已重新识别长难句', 'success'); return; }
     if (a === 'closeImport') { collectImport(); showImport = false; refreshMe(); return; }
     if (a === 'backList') { mode = 'list'; currentId = null; selectionText = ''; coach = null; activeIndex = -1; refreshMe(); return; }
 

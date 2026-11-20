@@ -1,45 +1,17 @@
-// 句子结构可视化：把本地 NLP 的标注映射为彩色，直接标在句中每个词上
-// 两种着色模式：按词性（名词/动词/形容词…）默认；按句子成分（主语/谓语/宾语…）
-// 点击任意单词可查内置词典释义。
+// 句子结构可视化：只画句子骨架（主句 / 从句 / 短语层次），不逐词标词性。
+// 原句中的单词仍可点击查词典，但不做词性着色。
 
 import { modal, toast } from './ui.js';
 import { addWords } from './store.js';
 import { dictLookup } from './dict.js';
 import { mdxLookup, mountMdxEntry } from './mdx.js';
 
-/* ---------- 模式一：按词性（POS）着色 ---------- */
-const POS_CATEGORY = {
-  NOUN: 'noun', PROPN: 'noun',          // 名词 / 专有名词
-  VERB: 'verb', AUX: 'verb',            // 动词 / 助动词
-  ADJ: 'adj',                            // 形容词
-  ADV: 'adv',                            // 副词
-  PRON: 'pron',                          // 代词
-  DET: 'det',                            // 限定词
-  ADP: 'prep',                           // 介词
-  CONJ: 'conj', SCONJ: 'conj',           // 连词 / 从属连词
-  NUM: 'num',                            // 数词
-  PART: 'part', INTJ: 'part', SYM: 'part', X: 'part'
-};
-
-export const POS_CATEGORIES = {
-  noun:  { label: '名词', color: '#efe7d4', text: '#6b5327' },
-  verb:  { label: '动词', color: '#f7ded6', text: '#983629' },
-  adj:   { label: '形容词', color: '#e6ecd9', text: '#4c5c2d' },
-  adv:   { label: '副词', color: '#f9ecc9', text: '#7a5a12' },
-  pron:  { label: '代词', color: '#e4e8ee', text: '#3c4a5c' },
-  prep:  { label: '介词', color: '#dbe8e2', text: '#2f5b4f' },
-  conj:  { label: '连词', color: '#f1e2e4', text: '#7d3f4c' },
-  det:   { label: '限定词', color: '#edeae1', text: '#5a5449' },
-  num:   { label: '数词', color: '#e2ecdf', text: '#35603a' },
-  part:  { label: '其他', color: '#eeebe2', text: '#6b675e' }
-};
-
-/* ---------- 模式二：按句子成分（依存关系）着色 ---------- */
+/* ---------- 结构角色配色（成分，不是词性） ---------- */
 const DEP_CATEGORY = {
   nsubj: 'subject', nsubjpass: 'subject', csubj: 'subject',
   ROOT: 'predicate', aux: 'predicate', auxpass: 'predicate', cop: 'predicate',
   dobj: 'object', iobj: 'object', attr: 'object', oprd: 'object', dative: 'object', pobj: 'object',
-  acl: 'clause', advcl: 'clause', relcl: 'clause', ccomp: 'clause', xcomp: 'clause', pcomp: 'clause', mark: 'clause',
+  acl: 'clause', advcl: 'clause', relcl: 'clause', ccomp: 'clause', xcomp: 'clause', pcomp: 'clause',
   amod: 'modifier', advmod: 'modifier', nmod: 'modifier', poss: 'modifier', compound: 'modifier',
   nummod: 'modifier', appos: 'modifier', neg: 'modifier', npadvmod: 'modifier', acomp: 'modifier', expl: 'modifier',
   prep: 'function', cc: 'function', case: 'function', det: 'function', prn: 'function', punct: 'function'
@@ -48,56 +20,118 @@ const DEP_CATEGORY = {
 export const DEP_CATEGORIES = {
   subject:   { label: '主语', color: '#dfe5ef', text: '#33465f' },
   predicate: { label: '谓语', color: '#f6dbd3', text: '#9a3f2a' },
-  object:    { label: '宾语', color: '#f1e4cf', text: '#7a5320' },
-  clause:    { label: '从句/复杂结构', color: '#e8e1f2', text: '#54466f' },
-  modifier:  { label: '修饰语', color: '#d9e8e2', text: '#2f5b4f' },
-  function:  { label: '功能词', color: '#eceae3', text: '#5a564c' }
+  object:    { label: '宾语/表语', color: '#f1e4cf', text: '#7a5320' },
+  clause:    { label: '从句', color: '#e8e1f2', text: '#54466f' },
+  modifier:  { label: '修饰', color: '#d9e8e2', text: '#2f5b4f' },
+  function:  { label: '连接', color: '#eceae3', text: '#5a564c' },
+  phrase:    { label: '短语', color: '#e9ece9', text: '#4a5248' }
 };
 
-function posCategoryOf(t) { return POS_CATEGORY[t.pos] || 'part'; }
-function depCategoryOf(t) { return DEP_CATEGORY[t.dep] || 'function'; }
+/** 从句类依存关系：出现即视为一层从句/非谓语结构 */
+const CLAUSE_DEPS = new Set(['acl', 'advcl', 'relcl', 'ccomp', 'xcomp', 'pcomp', 'csubj', 'csubjpass']);
 
-/** 生成按词性着色的句子 HTML（每个词直接带底色） */
-export function coloredSentenceByPos(nlp) {
-  if (!nlp?.tokens?.length) return '';
-  return nlp.tokens.map((t) => {
-    const cat = posCategoryOf(t);
-    const c = POS_CATEGORIES[cat];
-    const tip = `${t.text}｜${t.posZh || t.pos}（${t.pos}）｜原形 ${t.lemma || t.text}${t.depZh ? `｜${t.depZh}` : ''}｜点击查看词典释义`;
-    if (t.pos === 'PUNCT' || t.pos === 'SPACE') {
-      return `<span class="viz-token" title="${escAttr(tip)}">${escHtml(t.text)}</span>`;
-    }
+function depCategoryOf(dep) { return DEP_CATEGORY[dep] || 'function'; }
+
+/** 原句：单词可点击查词，但不做任何词性标注或着色 */
+export function plainSentence(nlp) {
+  const tokens = nlp?.tokens;
+  if (!Array.isArray(tokens) || !tokens.length) return '';
+  return tokens.map((t) => {
     const lemma = String(t.lemma || t.text || '').toLowerCase().replace(/[^a-z'-]/g, '');
-    return `<span class="viz-token viz-pos viz-word" data-word="${escAttr(lemma)}" style="background:${c.color};color:${c.text}" title="${escAttr(tip)}">${escHtml(t.text)}</span>`;
+    if (!lemma || t.pos === 'PUNCT' || t.pos === 'SPACE' || t.pos === 'SYM') {
+      return `<span class="viz-plain">${escHtml(t.text)}</span>`;
+    }
+    return `<span class="viz-plain viz-plain-word" data-word="${escAttr(lemma)}" title="${escAttr(`点击查「${t.text}」的词典释义`)}">${escHtml(t.text)}</span>`;
   }).join(' ');
 }
 
-/** 生成按句子成分着色的句子 HTML */
-export function coloredSentenceByDep(nlp) {
-  if (!nlp?.tokens?.length) return '';
-  return nlp.tokens.map((t) => {
-    const cat = depCategoryOf(t);
-    const c = DEP_CATEGORIES[cat];
-    const tip = `${t.text}｜${t.depZh || t.dep} → ${t.headText}｜${t.posZh || t.pos}｜点击查看词典释义`;
-    if (t.pos === 'PUNCT' || t.pos === 'SPACE') {
-      return `<span class="viz-token" title="${escAttr(tip)}">${escHtml(t.text)}</span>`;
+/** 计算某 token 的子树范围（最小/最大 token 序号） */
+function subtreeRange(tokens, startIndex) {
+  let min = startIndex;
+  let max = startIndex;
+  const stack = [startIndex];
+  while (stack.length) {
+    const i = stack.pop();
+    const t = tokens[i];
+    if (!t) continue;
+    for (const c of t.children || []) {
+      if (c < min) min = c;
+      if (c > max) max = c;
+      stack.push(c);
     }
-    const lemma = String(t.lemma || t.text || '').toLowerCase().replace(/[^a-z'-]/g, '');
-    return `<span class="viz-token viz-pos viz-word" data-word="${escAttr(lemma)}" style="background:${c.color};color:${c.text}" title="${escAttr(tip)}">${escHtml(t.text)}</span>`;
-  }).join(' ');
+  }
+  return [min, max];
 }
 
-/** 兼容旧调用 */
-export function coloredSentence(nlp) { return coloredSentenceByDep(nlp); }
+/**
+ * 结构大纲：主句 + 逐层从句，按嵌套深度缩进。
+ * 只讲"这句由哪几块组成、谁修饰谁"，不拆到词性。
+ */
+export function structureOutline(nlp) {
+  const tokens = nlp?.tokens;
+  if (!Array.isArray(tokens) || !tokens.length) return null;
 
-/** 图例 HTML（可指定分类集） */
-export function legendHTML(categories = DEP_CATEGORIES) {
-  return `<div class="viz-legend">${Object.entries(categories).map(([key, c]) =>
-    `<span class="viz-legend-item"><i class="viz-legend-dot" style="background:${c.color};border:1px solid ${c.text}33"></i>${c.label}</span>`
-  ).join('')}</div>`;
+  const rootTok = tokens.find((t) => t.dep === 'ROOT') || null;
+  const mainRange = rootTok ? subtreeRange(tokens, rootTok.i) : null;
+
+  const clauses = tokens
+    .filter((t) => CLAUSE_DEPS.has(t.dep))
+    .map((t) => {
+      const [start, end] = subtreeRange(tokens, t.i);
+      const text = tokens.filter((x) => x.i >= start && x.i <= end).map((x) => x.text).join(' ');
+      return {
+        start, end,
+        head: t.headText,
+        dep: t.dep,
+        label: t.depZh || t.dep,
+        text: text.length > 180 ? `${text.slice(0, 180)}…` : text
+      };
+    })
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // 同一范围的重复结构只留一个
+  const unique = [];
+  for (const c of clauses) {
+    if (unique.some((u) => u.start === c.start && u.end === c.end)) continue;
+    unique.push(c);
+  }
+
+  // 深度 = 被多少个其它结构完整包住
+  unique.forEach((c) => {
+    c.depth = unique.filter((o) => o !== c && o.start <= c.start && o.end >= c.end && (o.start < c.start || o.end > c.end)).length;
+  });
+
+  const mainText = mainRange
+    ? tokens.filter((x) => x.i >= mainRange[0] && x.i <= mainRange[1]).map((x) => x.text).join(' ')
+    : '';
+
+  return { root: rootTok, mainText, clauses: unique };
 }
 
-/** 结构流程图 */
+/** 结构大纲 HTML */
+export function structureTreeHTML(nlp) {
+  const outline = structureOutline(nlp);
+  if (!outline) return '';
+  const rows = [];
+  if (outline.mainText) {
+    rows.push(`<div class="struct-row" style="--depth:0">
+      <span class="struct-chip" style="background:${DEP_CATEGORIES.predicate.color};color:${DEP_CATEGORIES.predicate.text}">主句</span>
+      <span class="struct-text">${escHtml(outline.mainText.slice(0, 220))}</span>
+    </div>`);
+  }
+  for (const c of outline.clauses) {
+    const cat = DEP_CATEGORIES.clause;
+    rows.push(`<div class="struct-row" style="--depth:${Math.min(c.depth + 1, 4)}">
+      <span class="struct-chip" style="background:${cat.color};color:${cat.text}">${escHtml(c.label)}</span>
+      <span class="struct-text">${escHtml(c.text)}</span>
+    </div>`);
+  }
+  if (!rows.length) return '';
+  return `<div class="struct-tree">${rows.join('')}</div>
+    <div class="tiny muted mt8">缩进表示层级：越往右，修饰的是左边最近的那一层结构</div>`;
+}
+
+/** AI 给出的结构拆解（主句 + 各成分作用） */
 export function structureFlow(explanation) {
   const items = [];
   if (explanation?.structure) items.push({ text: explanation.structure, cat: 'predicate' });
@@ -105,7 +139,7 @@ export function structureFlow(explanation) {
     const role = String(b.role || '');
     let cat = 'modifier';
     if (/主语|subject/i.test(role)) cat = 'subject';
-    else if (/谓语|宾语|predicate|object/i.test(role)) cat = 'object';
+    else if (/谓语|宾语|表语|predicate|object/i.test(role)) cat = 'object';
     else if (/从句|定语|状语|从属|关系/i.test(role)) cat = 'clause';
     items.push({ text: `${b.part}：${role}`, cat });
   });
@@ -116,37 +150,22 @@ export function structureFlow(explanation) {
   }).join('')}</div>`;
 }
 
-/** 依存树可读文本 */
-export function treeText(nlp) {
-  const root = nlp?.tree;
-  if (!root) return '';
+/** 纯文本层级（导出用） */
+export function structureText(nlp) {
+  const outline = structureOutline(nlp);
+  if (!outline) return '';
   const lines = [];
-  function walk(node, indent, prefix) {
-    const label = `${node.text} [${node.depZh || node.dep}]`;
-    lines.push(`${indent}${prefix}${label}`);
-    (node.children || []).forEach((ch) => walk(ch, indent + '  ', '├ '));
-  }
-  walk(root, '', '● ');
+  if (outline.mainText) lines.push(`● 主句：${outline.mainText}`);
+  outline.clauses.forEach((c) => {
+    lines.push(`${'  '.repeat(Math.min(c.depth + 1, 4))}└ ${c.label}：${c.text}`);
+  });
   return lines.join('\n');
 }
 
-/** 弹窗挂载后：绑定着色切换 + 点词查词典 */
+/** 弹窗挂载后：绑定点词查词典 */
 export function mountVizToggles(overlay) {
-  const bar = overlay.querySelector('.viz-mode-bar');
-  if (bar) {
-    bar.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-viz-mode]');
-      if (!btn) return;
-      const mode = btn.dataset.vizMode;
-      bar.querySelectorAll('[data-viz-mode]').forEach((b) => b.classList.toggle('active', b.dataset.vizMode === mode));
-      overlay.querySelectorAll('[data-viz-panel]').forEach((p) => {
-        p.style.display = p.dataset.vizPanel === mode ? '' : 'none';
-      });
-    });
-  }
-
   overlay.addEventListener('click', (e) => {
-    const tok = e.target.closest('.viz-word[data-word]');
+    const tok = e.target.closest('.viz-plain-word[data-word]');
     if (!tok) return;
     const word = String(tok.dataset.word || '').toLowerCase();
     if (!/^[a-z][a-z'-]*$/.test(word)) return;
@@ -182,7 +201,6 @@ async function showWordDetail(word, anchor) {
       }
     };
 
-    // 优先展示导入的 MDX 词典（内容最完整、还原原书排版）
     if (mdxEntry) {
       const head = `
         <div class="mdx-entry-head">
@@ -227,34 +245,20 @@ async function showWordDetail(word, anchor) {
   }
 }
 
-/** 完整的弹性可视化弹窗 body */
+/** 完整的弹性可视化弹窗 body：只展示结构，不展示词性 */
 export function vizModalBody(explanation, { showWords = true } = {}) {
   const e = explanation || {};
-  const hasNlp = !!(e.nlp && (e.nlp.tokens?.length || e.nlp.tree));
-  const canColor = !!(e.nlp?.tokens?.length);
+  const hasTokens = !!(e.nlp?.tokens?.length);
 
-  let coloredBlock;
-  if (canColor) {
-    coloredBlock = `
-      <div class="viz-mode-bar">
-        <button type="button" class="viz-mode-btn active" data-viz-mode="pos">按词性着色</button>
-        <button type="button" class="viz-mode-btn" data-viz-mode="dep">按句子成分着色</button>
-      </div>
-      <div data-viz-panel="pos">
-        <div class="viz-sentence">${coloredSentenceByPos(e.nlp)}</div>
-        ${legendHTML(POS_CATEGORIES)}
-      </div>
-      <div data-viz-panel="dep" style="display:none">
-        <div class="viz-sentence">${coloredSentenceByDep(e.nlp)}</div>
-        ${legendHTML(DEP_CATEGORIES)}
-      </div>
-      <div class="tiny muted mt8">把鼠标移到词上可看词性与原形，点击任意单词查看词典释义</div>`;
-  } else {
-    coloredBlock = `<div class="viz-sentence">${escHtml(e.sentence || '')}</div>
-       ${hasNlp ? '' : '<div class="tiny muted mt8">本地 NLP 骨架不可用，本次为纯 AI 讲解</div>'}`;
-  }
+  const sentenceBlock = hasTokens
+    ? `<div class="viz-sentence">${plainSentence(e.nlp)}</div>
+       <div class="tiny muted mt8">点击任意单词查看词典释义</div>`
+    : `<div class="viz-sentence">${escHtml(e.sentence || '')}</div>
+       <div class="tiny muted mt8">本地 NLP 骨架不可用，本次为纯 AI 讲解</div>`;
 
+  const tree = hasTokens ? structureTreeHTML(e.nlp) : '';
   const flow = structureFlow(e);
+
   const grammar = (e.grammar || []).length
     ? `<div class="viz-section"><h4>语法点</h4>${e.grammar.map((g) =>
         `<div class="grammar-item"><b>${escHtml(g.point)}</b>：${escHtml(g.explain)}</div>`).join('')}</div>` : '';
@@ -266,16 +270,14 @@ export function vizModalBody(explanation, { showWords = true } = {}) {
           ${w.phonetic ? `<div class="tiny muted">${escHtml(w.phonetic)} ${escHtml(w.pos || '')}</div>` : ''}
           <div class="small">${escHtml(w.meaning)}</div></div>`).join('')}</div></div>` : '';
 
-  const tree = e.nlp?.tree
-    ? `<div class="viz-section"><h4>依存句法树（本地 spaCy）</h4><div class="viz-tree">${escHtml(treeText(e.nlp))}</div></div>` : '';
-
   const tip = e.tip ? `<div class="feedback mt12">${escHtml(e.tip)}</div>` : '';
 
   return `<div class="viz-wrap">
-    ${coloredBlock}
+    <div class="viz-section"><h4>原句</h4>${sentenceBlock}</div>
+    ${tree ? `<div class="viz-section"><h4>结构层次（本地 NLP）</h4>${tree}</div>` : ''}
     <div class="viz-section"><h4>翻译</h4><div class="viz-trans">${escHtml(e.translation || '')}</div></div>
     ${flow ? `<div class="viz-section"><h4>结构拆解</h4>${flow}</div>` : ''}
-    ${grammar}${words}${tree}${tip}
+    ${grammar}${words}${tip}
   </div>`;
 }
 

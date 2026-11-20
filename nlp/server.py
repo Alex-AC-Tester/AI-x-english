@@ -184,11 +184,6 @@ def analyze_sentence(text, with_preview=True):
             preview_lines.append("名词块: " + " / ".join(c["text"] for c in chunks[:12]))
         if clauses:
             preview_lines.append("从句标记: " + " ; ".join("%s(%s)->%s" % (c["marker"], c["type"], c["text"][:60]) for c in clauses[:6]))
-        # 逐词标注：只保留实词与关键虚词，控制长度
-        key_tokens = [t for t in tokens if t["pos"] not in ("PUNCT", "SPACE", "DET")]
-        preview_lines.append("逐词标注(词/原形/词性/依存/中心词): " + " ; ".join(
-            "%s/%s/%s/%s→%s" % (t["text"], t["lemma"], t["pos"], t["dep"], t["headText"])
-            for t in key_tokens[:60]))
         if entities:
             preview_lines.append("命名实体: " + " / ".join("%s(%s)" % (e["text"], e["label"]) for e in entities[:10]))
         result["preview"] = "\n".join(preview_lines)

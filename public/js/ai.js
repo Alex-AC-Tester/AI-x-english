@@ -1,9 +1,15 @@
 // AI 能力封装：拍照 OCR、出题、主观题批改、学习报告
 
-import { getSettings } from './store.js';
+import { getSettings, getState } from './store.js';
 import { parseLooseJSON } from './ui.js';
 import { isNative, apiCredentials, nativeAIRequest } from './bridge.js';
 import { nlpSentence, nlpArticle, syntaxHint } from './nlp.js';
+import { profilePrompt } from './profile.js';
+
+/** 取当前学习画像摘要；取不到时返回空串，不影响调用 */
+function learnerContext() {
+  try { return profilePrompt(getState()); } catch (_) { return ''; }
+}
 
 async function aiFetch(payload) {
   const s = getSettings();
@@ -392,6 +398,7 @@ export async function analyzeArticle(title, text) {
 1. 只输出 JSON，不要 Markdown。
 2. keyWords 取 8-15 个，hardSentences 取 2-5 句，highlights 取 3-5 条，quiz 取 2-4 题。
 3. 所有引号内容必须是中文说明或原文摘录，不要杜撰原文没有的句子。
+${learnerContext() ? `4. 学生画像如下，分析难度与词汇取舍要贴合他的水平：\n${learnerContext()}` : ''}
 ${hint}`
     },
     { role: 'user', content: `标题：${title || '(无标题)'}\n\n正文：\n${String(text).slice(0, 15000)}` }
@@ -515,6 +522,7 @@ export async function coachSentence({ sentence, context = '', transcript = [], t
   const user = [
     `【原句】${sentence}`,
     context ? `【上下文】${String(context).slice(0, 1200)}` : '',
+    learnerContext(),
     lines.join('\n'),
     nlpPart,
     `【本轮】${thisTurn}`,
@@ -553,6 +561,7 @@ export async function explainSentence(sentence, context = '') {
   // 先做确定性句法分析，作为给 LLM 的参考骨架（失败则降级）
   const nlpResult = await nlpSentence(sentence);
   const hint = syntaxHint(nlpResult);
+  const profile = learnerContext();
   const out = await chat([
     {
       role: 'system',
@@ -572,6 +581,7 @@ export async function explainSentence(sentence, context = '') {
 1. 只输出 JSON，不要 Markdown。
 2. words 取 2-6 个最值得记的词或短语，level 用「核心/进阶/拓展」之一。
 3. breakdown 3-6 项，grammar 1-3 项；全部用中文说明。
+${profile ? `4. 学生画像（据此控制讲解深度与词汇取舍）：\n${profile}` : ''}
 ${hint}`
     },
     { role: 'user', content: `句子：${sentence}\n\n上下文（可能为空）：\n${String(context).slice(0, 1500)}` }
