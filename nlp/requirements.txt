@@ -1,0 +1,9 @@
+# WordWise 本地 NLP 服务依赖（位置：wordwise/.venv）
+# 安装：
+#   python -m venv .venv
+#   .venv\Scripts\python.exe -m pip install -r nlp/requirements.txt
+#   .venv\Scripts\python.exe -m pip install "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+#
+# 说明：en_core_web_sm 是 spaCy 模型包，不走 PyPI，必须单独按上面的 URL 安装。
+
+spacy==3.8.18

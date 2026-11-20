@@ -1,0 +1,23 @@
+# 依赖与本地产物
+node_modules/
+.venv/
+logs/
+.cowork-temp/
+
+# 本地数据：学习记录、MDX 词典、上传文件、推送密钥，不入库
+data/
+
+# 历史遗留的完整副本（见 环境说明.md 第七节）
+wordwise/
+
+# 本机工具配置
+.perch/
+
+# 杂项
+*.log
+*.7z
+.DS_Store
+Thumbs.db
+
+# 第三方库源码副本（运行依赖走 npm 的 js-mdict）
+js-mdict-7.0.0/

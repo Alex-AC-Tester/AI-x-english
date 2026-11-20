@@ -1,0 +1,16 @@
+{
+  "name": "词智 WordWise · AI 背单词",
+  "short_name": "词智",
+  "description": "拍照导入单词，AI 出题批改，数据看板与提醒",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f7fb",
+  "theme_color": "#5b5bd6",
+  "lang": "zh-CN",
+  "categories": ["education", "productivity"],
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
