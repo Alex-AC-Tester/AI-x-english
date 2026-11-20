@@ -37,10 +37,16 @@
 
 ## 配置 API Key
 
-仓库中**不含任何 API Key**。三种方式任选一种，Key 都不会进入版本库：
+仓库中**不含任何 API Key**，`config.json` 已被 git 忽略。首次使用先复制一份配置模板：
 
-1. 在应用「设置」页填写，前端通过 `x-api-key` 请求头透传。
-2. 本地 `config.json` 的 `apiKey` 字段（该文件已入库，提交前注意不要写入真实 Key）。
+```bash
+cp config.example.json config.json
+```
+
+Key 的三种提供方式，任选一种，都不会进入版本库：
+
+1. 在应用「设置」页填写，前端通过 `x-api-key` 请求头透传（服务端会把设置写回本地 `config.json`，该文件不入库）。
+2. 写入本地 `config.json` 的 `apiKey` 字段。
 3. 环境变量 `WORDWISE_API_KEY`（服务端优先读取，适合本机长期使用）。
 
 其余可调项在 `config.json`：端口、监听地址、网关地址、文本/视觉/批改模型、每日题量、提醒时间。
@@ -55,6 +61,7 @@ wordwise/
 │  ├─ server.py       # spaCy 句法分析服务（127.0.0.1:8791）
 │  ├─ requirements.txt
 │  └─ setup-venv.bat  # 一键创建 .venv 并自检
+├─ config.example.json # 配置模板（复制成 config.json 后填写自己的 Key）
 ├─ public/            # 前端页面与 JS 模块
 ├─ data/              # 本地数据（已忽略，不入库）
 ├─ tools/             # 词典构建、局域网地址、电子书测试脚本
