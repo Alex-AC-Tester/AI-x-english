@@ -1,4 +1,6 @@
 import { init, subscribe, onSync, getState, setSettings, getSettings } from './store.js';
+import { fetchMe, logout, getUser } from './auth.js';
+import { showLoginGate } from './login-screen.js';
 import { isNative } from './bridge.js';
 import { computeStats } from './stats.js';
 import { icon } from './ui.js';
@@ -14,10 +16,9 @@ import * as words from './views/words.js';
 import * as learn from './views/learn.js';
 import * as quiz from './views/quiz.js';
 import * as dashboard from './views/dashboard.js';
-import * as profile from './views/profile.js';
 import * as settings from './views/settings.js';
 
-const VIEWS = { home, reader, history, lookup, import: importView, words, learn, quiz, dashboard, profile, settings };
+const VIEWS = { home, reader, history, lookup, import: importView, words, learn, quiz, dashboard, settings };
 // tab: true 的项出现在移动端底栏（其余仍需在侧栏抽屉中访问）
 const NAV = [
   { name: 'home', label: '今日', icon: 'home', tab: true },
@@ -28,7 +29,6 @@ const NAV = [
   { name: 'learn', label: '背词', icon: 'target' },
   { name: 'quiz', label: '试卷', icon: 'clipboard', tab: true },
   { name: 'dashboard', label: '看板', icon: 'chart', tab: true },
-  { name: 'profile', label: '画像', icon: 'user' },
   { name: 'settings', label: '设置', icon: 'gear' }
 ];
 
@@ -64,12 +64,13 @@ function closeSidebar() {
 }
 
 function updateChrome(route) {
-  const view = VIEWS[route.name] || VIEWS.home;
+  const safeName = VIEWS[route.name] ? route.name : 'home';
+  const view = VIEWS[safeName];
   const title = typeof view.title === 'function' ? view.title(route.params) : view.title;
   const subtitle = typeof view.subtitle === 'function' ? view.subtitle(route.params) : view.subtitle;
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('pageSubtitle').textContent = subtitle;
-  document.querySelectorAll('[data-nav]').forEach((el) => el.classList.toggle('active', el.dataset.nav === route.name));
+  document.querySelectorAll('[data-nav]').forEach((el) => el.classList.toggle('active', el.dataset.nav === safeName));
 }
 
 function updateStreak() {
@@ -98,8 +99,50 @@ async function renderRoute(route) {
   catch (err) { console.error('[view mount]', err); }
 }
 
+function renderSideUser() {
+  const box = document.getElementById('sideUser');
+  if (!box) return;
+  const u = getUser();
+  if (!u) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="side-user">
+      <div class="side-avatar">${icon('user', 15)}</div>
+      <div class="side-user-text">
+        <strong>${escapeHTML(u.nickname || u.username)}</strong>
+        <span>@${escapeHTML(u.username)}</span>
+      </div>
+      ${u.local ? '' : `<button class="icon-btn side-logout" data-action="logout" type="button" title="退出登录">${icon('arrowRight', 15)}</button>`}
+    </div>`;
+}
+
+function escapeHTML(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 async function boot() {
+  // APK 内置版没有服务端，数据只存本机：跳过账号门槛
+  if (isNative()) {
+    await startApp({ id: 'local', username: '本机', nickname: '本机用户', local: true });
+    return;
+  }
+  const me = await fetchMe();
+  if (!me) {
+    showLoginGate(() => { boot().catch(console.error); });
+    return;
+  }
+  await startApp(me);
+}
+
+async function startApp(me) {
   buildNav();
+  renderSideUser();
+  document.addEventListener('click', async (e) => {
+    const out = e.target.closest('[data-action="logout"]');
+    if (!out) return;
+    await logout();
+    location.hash = '#/home';
+    location.reload();
+  });
   document.getElementById('menuBtn').innerHTML = icon('menu', 20);
   document.getElementById('menuBtn').addEventListener('click', () => {
     if (document.getElementById('sidebar')?.classList.contains('open')) closeSidebar();
@@ -109,7 +152,7 @@ async function boot() {
   document.getElementById('bellBtn').addEventListener('click', () => go('settings'));
 
   initRouter();
-  await init();
+  await init(me.id);
 
   // APK 内：默认首次授予通知权限时机由用户在设置页决定，并刷新一次系统闹钟
   if (isNative()) {

@@ -18,6 +18,7 @@ const { URL } = require('url');
 const nlp = require('./nlp-client');
 const dict = require('./dict');
 const mdx = require('./mdx');
+const auth = require('./auth');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -25,11 +26,12 @@ const DATA_DIR = path.join(ROOT, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
+const USERS_DIR = path.join(DATA_DIR, 'users');
 const CONFIG_FILE = path.join(ROOT, 'config.json');
 const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
 const SUBS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
-[DATA_DIR, UPLOAD_DIR, BACKUP_DIR].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+[DATA_DIR, UPLOAD_DIR, BACKUP_DIR, USERS_DIR].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -156,6 +158,33 @@ function saveStore(store) {
   }
   store.updatedAt = new Date().toISOString();
   writeJsonAtomic(STORE_FILE, store);
+}
+
+/* ---------------- 每用户学习数据 ---------------- */
+
+function userStoreFile(userId) {
+  return auth.storeFile(userId);
+}
+
+function loadUserStore(userId) {
+  const file = userStoreFile(userId);
+  const s = readJson(file, null);
+  if (!s || typeof s !== 'object') return emptyStore();
+  return Object.assign(emptyStore(), s);
+}
+
+function saveUserStore(userId, store) {
+  const file = userStoreFile(userId);
+  store.updatedAt = new Date().toISOString();
+  try {
+    if (fs.existsSync(file)) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      fs.copyFileSync(file, path.join(BACKUP_DIR, `user-${userId}-${stamp}.json`));
+      const mine = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith(`user-${userId}-`)).sort();
+      while (mine.length > 10) fs.unlinkSync(path.join(BACKUP_DIR, mine.shift()));
+    }
+  } catch (_) { /* 备份失败不阻断写入 */ }
+  writeJsonAtomic(file, store);
 }
 
 function send(res, status, data, extraHeaders = {}) {
@@ -397,6 +426,43 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   try {
+    const token = auth.tokenFrom(req);
+    const sessionHit = token ? auth.findSession(token) : null;
+    const currentUser = sessionHit ? auth.publicUser(sessionHit.user) : null;
+
+    /* ---------- 账号与会话 ---------- */
+    if (req.method === 'POST' && p === '/api/auth/register') {
+      const body = await readJsonBody(req, 64 * 1024);
+      try {
+        const user = auth.register(body);
+        const t = auth.createSession(user.id);
+        send(res, 200, { ok: true, user: auth.publicUser(user) }, { 'Set-Cookie': auth.sessionCookie(t, req) });
+      } catch (e) {
+        send(res, 400, { ok: false, error: e.message });
+      }
+      return;
+    }
+    if (req.method === 'POST' && p === '/api/auth/login') {
+      const body = await readJsonBody(req, 64 * 1024);
+      try {
+        const user = auth.login(body);
+        const t = auth.createSession(user.id);
+        send(res, 200, { ok: true, user: auth.publicUser(user) }, { 'Set-Cookie': auth.sessionCookie(t, req) });
+      } catch (e) {
+        send(res, 401, { ok: false, error: e.message });
+      }
+      return;
+    }
+    if (req.method === 'POST' && p === '/api/auth/logout') {
+      auth.destroySession(token);
+      send(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie() });
+      return;
+    }
+    if (req.method === 'GET' && p === '/api/auth/me') {
+      send(res, 200, { ok: true, user: currentUser });
+      return;
+    }
+
     if (req.method === 'GET' && p === '/api/health') {
       send(res, 200, { ok: true, time: new Date().toISOString(), dataFile: fs.existsSync(STORE_FILE), nlp: nlp.available });
       return;
@@ -562,16 +628,22 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/models') { await handleModels(req, res); return; }
     if (req.method === 'POST' && p === '/api/ai') { await handleAI(req, res); return; }
 
-    if (req.method === 'GET' && p === '/api/data') { send(res, 200, loadStore()); return; }
+    if (req.method === 'GET' && p === '/api/data') {
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
+      send(res, 200, loadUserStore(currentUser.id));
+      return;
+    }
     if (req.method === 'POST' && p === '/api/data') {
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
       const body = await readJsonBody(req, 32 * 1024 * 1024);
       if (!body || !Array.isArray(body.words)) { send(res, 400, { error: '数据格式不正确' }); return; }
-      saveStore(body);
-      send(res, 200, { ok: true, updatedAt: loadStore().updatedAt });
+      saveUserStore(currentUser.id, body);
+      send(res, 200, { ok: true, updatedAt: loadUserStore(currentUser.id).updatedAt });
       return;
     }
 
     if (req.method === 'POST' && p === '/api/upload') {
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
       const body = await readJsonBody(req, 20 * 1024 * 1024);
       const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(body.dataUrl || '');
       if (!m) { send(res, 400, { error: '图片格式不正确' }); return; }
@@ -604,11 +676,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && p === '/api/subscribe') {
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
       const body = await readJsonBody(req);
       if (!body.subscription || !body.subscription.endpoint) { send(res, 400, { error: '订阅信息不完整' }); return; }
       const subs = loadSubs();
       const idx = subs.findIndex((s) => s.endpoint === body.subscription.endpoint);
-      const entry = { endpoint: body.subscription.endpoint, keys: body.subscription.keys || {}, settings: body.settings || {}, updatedAt: new Date().toISOString() };
+      const entry = { endpoint: body.subscription.endpoint, userId: currentUser.id, keys: body.subscription.keys || {}, settings: body.settings || {}, updatedAt: new Date().toISOString() };
       if (idx >= 0) { entry.lastSentDate = subs[idx].lastSentDate; subs[idx] = entry; }
       else subs.push(entry);
       saveSubs(subs);
@@ -617,6 +690,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'DELETE' && p === '/api/subscribe') {
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
       const body = await readJsonBody(req);
       saveSubs(loadSubs().filter((s) => s.endpoint !== body.endpoint));
       send(res, 200, { ok: true });
@@ -624,7 +698,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && p === '/api/push-test') {
-      const subs = loadSubs();
+      if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
+      const subs = loadSubs().filter((s) => !s.userId || s.userId === currentUser.id);
       const results = await Promise.all(subs.map(async (s) => ({ endpoint: s.endpoint.slice(0, 50), ...(await sendPush(s)) })));
       send(res, 200, { ok: true, results });
       return;

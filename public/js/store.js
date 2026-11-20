@@ -68,6 +68,7 @@ function normalize(input = {}) {
 }
 
 let state = normalize();
+let storageKey = 'state';
 const listeners = new Set();
 const syncListeners = new Set();
 let saveTimer = null;
@@ -169,9 +170,10 @@ export function onSync(fn) { syncListeners.add(fn); fn(syncStatus); return () =>
 export function getState() { return state; }
 export function getSettings() { return state.settings; }
 
-export async function init() {
+export async function init(userId) {
+  if (userId) storageKey = `state:${userId}`;
   let local = null, remote = null;
-  try { local = await idbGet('state'); } catch (e) { console.warn('IDB 读取失败', e); }
+  try { local = await idbGet(storageKey); } catch (e) { console.warn('IDB 读取失败', e); }
 
   // APK 内：数据只存本机 IndexedDB，不请求服务端
   if (isNative()) {
@@ -214,7 +216,7 @@ export function save(immediate = false) {
   clearTimeout(saveTimer);
   const run = async () => {
     state.updatedAt = new Date().toISOString();
-    try { await idbSet('state', state); } catch (e) { setSync('error', '本地保存失败'); console.error(e); return; }
+    try { await idbSet(storageKey, state); } catch (e) { setSync('error', '本地保存失败'); console.error(e); return; }
     if (isNative()) { setSync('ok', '已存本机'); return; }
     setSync('busy', '同步中');
     try {
@@ -223,8 +225,8 @@ export function save(immediate = false) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSync('ok', '已同步');
-    } catch (_) {
-      setSync('error', '离线·仅本地');
+    } catch (err) {
+      setSync('error', String(err.message || '').includes('401') ? '登录已失效' : '离线·仅本地');
     }
   };
   if (immediate) return run();

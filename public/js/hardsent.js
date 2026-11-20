@@ -1,4 +1,4 @@
-// 长难句识别：本地 NLP 打分，挑出全文最难读的 5 句
+// 长难句识别：本地 NLP 打分，按篇幅挑出最难的几句
 // 只用句法统计（长度 / 从句数 / 嵌套 / 被动 / 结构标记），不做词性标注。
 
 import { nlpArticle } from './nlp.js';
@@ -83,12 +83,26 @@ function reasonOf(stats, text) {
 }
 
 /**
+ * 按篇幅决定挑几句：平均每 100-500 词一句，随文章长度自动增减
+ * - 短文（<=100 词）至少 1 句
+ * - 中等文章每 250 词左右 1 句
+ * - 长文最多 8 句，避免整页都是下划线
+ */
+export function hardSentenceLimit(totalWords) {
+  const w = Math.max(0, Number(totalWords) || 0);
+  if (w <= 0) return 1;
+  return Math.max(1, Math.min(8, Math.round(w / 250)));
+}
+
+/**
  * 从一组句子中挑出最难的前 N 句。
  * @param {{index:number,text:string}[]} sentences 阅读器分句结果（带全文序号）
  * @param {object|null} nlpResult /api/nlp/analyze-text 的返回
- * @param {number} limit 默认 5
+ * @param {number|null} limit 不传则按全文词数自动决定
  */
-export function pickHardSentences(sentences, nlpResult, limit = 5) {
+export function pickHardSentences(sentences, nlpResult, limit = null) {
+  const totalWords = sentences.reduce((n, s) => n + countEnWords(s.text), 0);
+  const cap = Math.max(1, Number(limit) || hardSentenceLimit(totalWords));
   const index = indexNlp(nlpResult);
   const scored = sentences.map((s) => {
     const stats = lookupStats(index, s.text);
@@ -118,7 +132,7 @@ export function pickHardSentences(sentences, nlpResult, limit = 5) {
   scored.sort((a, b) => b.score - a.score);
   const picked = [];
   for (const item of scored) {
-    if (picked.length >= limit) break;
+    if (picked.length >= cap) break;
     if (picked.some((p) => Math.abs(p.index - item.index) === 1 && Math.abs(p.score - item.score) < 2)) continue;
     picked.push(item);
   }
@@ -134,16 +148,20 @@ export function articleHash(text) {
 }
 
 /** 识别一篇文章的长难句：优先本地 NLP，失败退回文本启发式 */
-export async function detectHardSentences(sentences, text, limit = 5) {
+export async function detectHardSentences(sentences, text, limit = null) {
   let nlpResult = null;
   try {
     if (text) nlpResult = await nlpArticle(text, 120);
   } catch (_) {
     nlpResult = null;
   }
-  const picked = pickHardSentences(sentences, nlpResult, limit);
+  const totalWords = countEnWords(text) || sentences.reduce((n, s) => n + countEnWords(s.text), 0);
+  const cap = Math.max(1, Number(limit) || hardSentenceLimit(totalWords));
+  const picked = pickHardSentences(sentences, nlpResult, cap);
   return {
     items: picked,
+    limit: cap,
+    totalWords,
     engine: nlpResult ? nlpResult.engine : 'heuristic',
     at: new Date().toISOString()
   };

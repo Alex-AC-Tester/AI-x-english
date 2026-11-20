@@ -7,6 +7,8 @@ import { icon, esc, toast, modal, confirmDialog, pickFile, pickFiles, readAsData
 import { vizModalBody, mountVizToggles } from '../viz.js';
 import { nlpSentence } from '../nlp.js';
 import { detectHardSentences, articleHash } from '../hardsent.js';
+import { structPanelHTML, mountStructPanel } from '../structtree.js';
+import { openBacktrans } from '../backtrans.js';
 import { parseEbookFile, renderPdfToImages, EBOOK_ACCEPT, FORMAT_LABELS, countWords as countEbookWords } from '../ebook.js';
 import { go, refresh } from '../router.js';
 
@@ -21,6 +23,7 @@ let showImport = false;
 let ebookBusy = false;
 let ebookProgress = '';
 let hardBusy = false;
+let activeNlp = null;        // 当前选中句子的本地句法结构
 
 /**
  * 当前的精读对话会话
@@ -59,7 +62,7 @@ function sentenceIndex(struct, paraIdx, sentIdx) {
 
 /* ---------- 长难句识别（本地 NLP） ---------- */
 
-/** 文章文本变了、或还没有结果时，重新挑出 5 个长难句 */
+/** 文章文本变了、或还没有结果时，按篇幅重新挑出长难句 */
 async function ensureHardSentences(articleId, { force = false } = {}) {
   const a = getArticle(articleId);
   if (!a) return;
@@ -69,9 +72,11 @@ async function ensureHardSentences(articleId, { force = false } = {}) {
   hardBusy = true;
   try {
     const sentences = flattenSentences(splitArticle(a.text)).map((text, index) => ({ index, text }));
-    const r = await detectHardSentences(sentences, a.text, 5);
+    const r = await detectHardSentences(sentences, a.text);
     patchArticle(articleId, {
       hardSentences: r.items,
+      hardLimit: r.limit,
+      hardWords: r.totalWords,
       hardHash: hash,
       hardAt: r.at,
       hardEngine: r.engine
@@ -86,10 +91,12 @@ async function ensureHardSentences(articleId, { force = false } = {}) {
 
 function renderHardCard(a, list) {
   const engine = a.hardEngine === 'heuristic' ? '文本启发式（NLP 未就绪）' : (a.hardEngine || '本地 NLP');
+  const words = Number(a.hardWords) || 0;
+  const density = words ? `全文 ${words} 词，约每 ${Math.max(100, Math.round(words / Math.max(1, list.length || 1)))} 词 1 句` : '按篇幅自动决定句数';
   return `<section class="card mb16">
     <div class="card-head">
-      <div><h2>长难句 <span class="pill">${list.length || 5}</span></h2>
-        <div class="sub">${esc(engine)} · 按长度、从句层级与嵌套深度挑选，正文中紫色下划线标出</div></div>
+      <div><h2>长难句 <span class="pill">${list.length || 0}</span></h2>
+        <div class="sub">${esc(engine)} · ${esc(density)} · 按长度、从句层级与嵌套深度挑选，正文中紫色下划线标出</div></div>
       <button class="btn btn-sm btn-ghost" data-action="redetectHard" ${hardBusy ? 'disabled' : ''}>
         ${hardBusy ? '<span class="loading"></span>' : '重新识别'}</button>
     </div>
@@ -255,11 +262,52 @@ function renderRead() {
 
       <div>
         ${renderHardCard(a, hardList)}
+        ${renderStructCard()}
+        ${renderBacktransCard(a)}
         ${renderExplanationPanel()}
         ${a.analysis ? renderAnalysis(a.analysis) : ''}
       </div>
     </div>
   `;
+}
+
+/** 结构树卡片：点句子 → 右侧出现依存树 / 成分树 */
+function renderStructCard() {
+  const body = activeIndex >= 0
+    ? structPanelHTML(activeNlp, { loading: !activeNlp })
+    : `<div class="empty" style="padding:26px 0">${icon('layers', 26)}<p>点正文里的任意一句，这里会出现它的结构树</p></div>`;
+  return `<section class="card mb16" id="structCard">
+    <div class="card-head"><div><h2>结构树</h2>
+      <div class="sub">${activeIndex >= 0 ? `第 ${activeIndex + 1} 句 · 悬停节点高亮原文，点 ▾ 折叠从句` : '依存树 / 成分树，只画结构不标词性'}</div></div>${icon('layers', 18)}</div>
+    <div data-struct-host>${body}</div>
+  </section>`;
+}
+
+/** 回译练习：只列已经精读过的句子（有中文译文才能遮住原文） */
+function renderBacktransCard(a) {
+  const map = a.sentences || {};
+  const items = Object.keys(map)
+    .map((k) => Number(k))
+    .filter((n) => Number.isFinite(n))
+    .sort((x, y) => x - y)
+    .map((i) => ({ i, s: map[i] }))
+    .filter((x) => x.s && x.s.translation)
+    .slice(0, 6);
+  if (!items.length) {
+    return `<section class="card mb16">
+      <div class="card-head"><div><h2>回译练习</h2><div class="sub">看中文写英文，交卷后逐词对照</div></div>${icon('refresh', 18)}</div>
+      <div class="tiny muted">精读完一句（拿到中文译文）后，这里会出现回译练习。</div>
+    </section>`;
+  }
+  return `<section class="card mb16">
+    <div class="card-head"><div><h2>回译练习 <span class="pill">${items.length}</span></h2>
+      <div class="sub">遮住原文，看中文写英文；交卷后按词比对，自动分出时态 / 词序 / 搭配问题</div></div>${icon('refresh', 18)}</div>
+    <div class="bt-list">${items.map(({ i, s }) => `
+      <button class="bt-item" type="button" data-action="backtrans" data-i="${i}">
+        <span class="bt-item-zh">${esc(String(s.translation || '').slice(0, 60))}${String(s.translation || '').length > 60 ? '…' : ''}</span>
+        <span class="bt-item-go">${icon('arrowRight', 14)}</span>
+      </button>`).join('')}</div>
+  </section>`;
 }
 
 function verdictLabel(v) {
@@ -377,6 +425,7 @@ function renderCoachAnalysis(c) {
     ${e.tip ? `<div class="feedback mt12">${icon('info', 13)} ${esc(e.tip)}</div>` : ''}
     <div class="row mt16">
       <button class="btn btn-sm btn-ghost" data-action="coachRestart">${icon('refresh', 13)} 再练一次这句</button>
+      ${e.translation ? `<button class="btn btn-sm btn-primary" data-action="coachBacktrans">${icon('refresh', 13)} 回译对照</button>` : ''}
     </div>`;
 }
 
@@ -521,13 +570,23 @@ function openCoach(index, sentenceOverride = '') {
     error: ''
   };
   activeIndex = index;
+  activeNlp = (index >= 0 && a.sentences?.[index]?.nlp) || null;
   refreshKeep();
   scrollCoachIntoView();
 
-  // 后台取本地句法骨架：只在最终讲解时用于校准，引导阶段不会泄露
-  nlpSentence(sentence)
-    .then((r) => { if (coach && coach.sentence === sentence) coach.nlp = r; })
-    .catch(() => {});
+  // 后台取本地句法骨架：结构树先用缓存，没有再请求
+  if (!activeNlp) {
+    nlpSentence(sentence)
+      .then((r) => {
+        if (coach && coach.sentence === sentence) {
+          coach.nlp = r;
+          if (activeIndex === index) { activeNlp = r; refreshKeep(); }
+        }
+      })
+      .catch(() => {});
+  } else {
+    coach.nlp = activeNlp;
+  }
 
   if (!coach.cached) startCoach();
 }
@@ -670,6 +729,10 @@ export function mount() {
     }
   }
 
+  // 结构树交互：页签、折叠、悬停高亮
+  const structCard = view.querySelector('#structCard');
+  if (structCard) mountStructPanel(structCard);
+
   view.addEventListener('click', async (e) => {
     const sentenceEl = e.target.closest('.sentence');
     if (sentenceEl && !e.target.closest('[data-action]')) {
@@ -691,6 +754,21 @@ export function mount() {
     if (a === 'newImport') { collectImport(); showImport = true; refreshMe(); return; }
     if (a === 'goHistory') { go('history'); return; }
     if (a === 'hardItem') { openCoach(Number(btn.dataset.i)); return; }
+    if (a === 'backtrans') {
+      const art = getArticle(currentId);
+      const i = Number(btn.dataset.i);
+      const s = art?.sentences?.[i];
+      if (!s?.translation) { toast('这句还没有译文', 'info'); return; }
+      const all = flattenSentences(splitArticle(art.text));
+      openBacktrans({ sentence: all[i] || s.sentence || '', translation: s.translation, articleId: currentId, index: i });
+      return;
+    }
+    if (a === 'coachBacktrans') {
+      const c = coach;
+      if (!c?.analysis?.translation) { toast('先看到完整讲解，才有中文译文', 'info'); return; }
+      openBacktrans({ sentence: c.sentence, translation: c.analysis.translation, articleId: currentId, index: c.index });
+      return;
+    }
     if (a === 'redetectHard') { await ensureHardSentences(currentId, { force: true }); toast('已重新识别长难句', 'success'); return; }
     if (a === 'closeImport') { collectImport(); showImport = false; refreshMe(); return; }
     if (a === 'backList') { mode = 'list'; currentId = null; selectionText = ''; coach = null; activeIndex = -1; refreshMe(); return; }

@@ -131,9 +131,27 @@ export function buildProfile(state = {}) {
   };
 }
 
-/** 供 AI 提示词使用的画像摘要（拿不到画像时返回空串） */
+/** 画像启用门槛：素材量不足时，不生成画像也不注入提示词 */
+export const MIN_SAMPLE = { words: 40, explained: 15, attempts: 30 };
+
+/** 检查素材量是否足够评估画像 */
+export function sampleReadiness(state) {
+  const s = state || {};
+  const words = (s.words || []).length;
+  const explained = (s.sentenceHistory || []).length;
+  const attempts = (s.attempts || []).length;
+  const have = { words, explained, attempts };
+  const need = MIN_SAMPLE;
+  const ratio = (a, b) => (b > 0 ? Math.min(1, a / b) : 1);
+  const progress = Math.round(((ratio(words, need.words) + ratio(explained, need.explained) + ratio(attempts, need.attempts)) / 3) * 100);
+  const ready = words >= need.words && explained >= need.explained && attempts >= need.attempts;
+  return { ready, have, need, progress };
+}
+
+/** 供 AI 提示词使用的画像摘要（素材不足或计算失败时返回空串） */
 export function profilePrompt(state) {
   try {
+    if (!sampleReadiness(state).ready) return '';
     return buildProfile(state).prompt;
   } catch (_) {
     return '';

@@ -43,6 +43,8 @@ export function render() {
       <div class="heat-grid">${st.heat.map((d) => `<div class="heat-cell" data-l="${d.level}" title="${d.date}：${d.count} 题"></div>`).join('')}</div>
     </section>
 
+    ${backtransCard()}
+
     <div class="grid grid-2 mt16">
       <section class="card">
         <div class="card-head"><div><h2>重点复习词</h2><div class="sub">掌握度最低，优先进入下一份试卷</div></div><button class="btn btn-sm" data-action="goWords">去词库 ${icon('arrowRight', 13)}</button></div>
@@ -75,6 +77,35 @@ export function render() {
       </div>
     </section>
   `;
+}
+
+function backtransCard() {
+  const attempts = (getState().attempts || []).filter((a) => a.type === 'backtranslate');
+  if (!attempts.length) {
+    return `<section class="card mt16">
+      <div class="card-head"><div><h2>回译练习</h2><div class="sub">看中文写英文，交卷后逐词对照</div></div>${icon('refresh', 18)}</div>
+      <div class="tiny muted">在文章精读里点「回译对照」或侧栏「回译练习」开始，每次结果都会汇总到这里。</div>
+    </section>`;
+  }
+  const avg = Math.round(attempts.reduce((n, a) => n + (Number(a.score) || 0), 0) / attempts.length);
+  const errMap = new Map();
+  attempts.forEach((a) => (a.errorTypes || []).forEach((t) => {
+    errMap.set(t.type, (errMap.get(t.type) || 0) + (Number(t.count) || 1));
+  }));
+  const rows = [...errMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const max = rows.length ? rows[0][1] : 1;
+  return `<section class="card mt16">
+    <div class="card-head"><div><h2>回译练习</h2><div class="sub">中译英的吻合度与错误类型</div></div><span class="pill">${attempts.length} 次</span></div>
+    <div class="row spread"><span class="tiny muted">平均词级吻合度</span><b>${avg}%</b></div>
+    <div class="mastery-bar mt8" style="width:100%"><i style="width:${avg}%;background:${avg >= 80 ? 'var(--success)' : avg >= 60 ? 'var(--warn)' : 'var(--danger)'}"></i></div>
+    ${rows.length ? `<div class="mt16">${rows.map(([type, n]) => `
+      <div class="row spread" style="margin:7px 0">
+        <span class="small">${esc(type)}</span>
+        <span class="tiny muted">${n} 处</span>
+      </div>
+      <div class="mastery-bar" style="width:100%"><i style="width:${Math.round((n / max) * 100)}%;background:#c98a4b"></i></div>`).join('')}</div>`
+      : `<div class="tiny muted mt12">还没有出现明显差异，继续保持。</div>`}
+  </section>`;
 }
 
 function kpi(label, value, foot, iconName, color) {
