@@ -1,4 +1,5 @@
-// 账号与会话（浏览器端）：只保存用户信息，令牌放在 httpOnly Cookie 里
+// 账号状态（浏览器端）：注册 / 登录 / 退出已暂时关闭，只保留读取当前本机账号。
+// 恢复账号功能时，把 /api/auth/login、/api/auth/register 的调用与登录界面一起加回来。
 
 let currentUser = null;
 
@@ -22,32 +23,4 @@ export async function fetchMe() {
   return currentUser;
 }
 
-export async function login(username, password) {
-  const data = await req('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
-  });
-  currentUser = data.user || null;
-  return currentUser;
-}
-
-export async function register(username, password, nickname) {
-  const data = await req('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, nickname })
-  });
-  currentUser = data.user || null;
-  return currentUser;
-}
-
-export async function logout() {
-  try {
-    await req('/api/auth/logout', { method: 'POST' });
-  } catch (_) { /* 已过期也当作登出 */ }
-  currentUser = null;
-}
-
 export function getUser() { return currentUser; }
-export function isLoggedIn() { return !!currentUser; }

@@ -1,6 +1,6 @@
 import { init, subscribe, onSync, getState, setSettings, getSettings } from './store.js';
-import { fetchMe, logout, getUser } from './auth.js';
-import { showLoginGate } from './login-screen.js';
+import { fetchMe, getUser } from './auth.js';
+import { speak as speakText, speakSequence, splitForSpeech, stop as stopSpeaking, ttsAvailable } from './tts.js';
 import { isNative } from './bridge.js';
 import { computeStats } from './stats.js';
 import { icon } from './ui.js';
@@ -21,22 +21,25 @@ import * as settings from './views/settings.js';
 const VIEWS = { home, reader, history, lookup, import: importView, words, learn, quiz, dashboard, settings };
 // tab: true 的项出现在移动端底栏（其余仍需在侧栏抽屉中访问）
 const NAV = [
-  { name: 'home', label: '今日', icon: 'home', tab: true },
-  { name: 'reader', label: '阅读', icon: 'reader', tab: true },
-  { name: 'history', label: '句库', icon: 'chat' },
-  { name: 'lookup', label: '查词', icon: 'searchWord', tab: true },
-  { name: 'words', label: '词库', icon: 'book', tab: true },
-  { name: 'learn', label: '背词', icon: 'target' },
-  { name: 'quiz', label: '试卷', icon: 'clipboard', tab: true },
-  { name: 'dashboard', label: '看板', icon: 'chart', tab: true },
-  { name: 'settings', label: '设置', icon: 'gear' }
+  { name: 'home', label: '今天', icon: 'home', tab: true, group: '学习' },
+  { name: 'reader', label: '阅读', icon: 'reader', tab: true, group: '学习' },
+  { name: 'words', label: '词库', icon: 'book', tab: true, group: '学习' },
+  { name: 'learn', label: '复习', icon: 'target', group: '学习' },
+  { name: 'quiz', label: '试卷', icon: 'clipboard', tab: true, group: '学习' },
+  { name: 'lookup', label: '查词', icon: 'searchWord', tab: true, group: '工具' },
+  { name: 'history', label: '句库', icon: 'chat', group: '工具' },
+  { name: 'dashboard', label: '统计', icon: 'chart', tab: true, group: '工具' },
+  { name: 'settings', label: '设置', icon: 'gear', group: '' }
 ];
 
 function buildNav() {
   const side = document.getElementById('sideNav');
   const tabs = document.getElementById('tabbar');
-  side.innerHTML = NAV.map((n) => `
-    <button class="nav-item" data-nav="${n.name}" type="button">${icon(n.icon)}<span>${n.label}</span><span class="badge hide" data-badge="${n.name}"></span></button>`).join('');
+  side.innerHTML = NAV.map((n, i) => {
+    const head = n.group && (i === 0 || NAV[i - 1].group !== n.group)
+      ? `<div class="nav-group">${n.group}</div>` : '';
+    return `${head}<button class="nav-item" data-nav="${n.name}" type="button">${icon(n.icon)}<span>${n.label}</span><span class="badge hide" data-badge="${n.name}"></span></button>`;
+  }).join('');
   tabs.innerHTML = NAV.filter((n) => n.tab).map((n) => `
     <button class="tab-item" data-nav="${n.name}" type="button">${icon(n.icon, 20)}<span>${n.label}</span></button>`).join('');
 
@@ -80,11 +83,12 @@ function updateStreak() {
 
 function updateBadges() {
   const due = getState().words.filter((w) => !w.srs?.dueAt || w.srs.dueAt <= Date.now() || !w.srs?.level).length;
-  const badge = document.querySelector('[data-badge="words"]');
+  const badge = document.querySelector('[data-badge="learn"]');
   if (badge) { badge.textContent = due > 99 ? '99+' : due; badge.classList.toggle('hide', due === 0); }
 }
 
 async function renderRoute(route) {
+  stopSpeaking();          // 换页面时停掉正在进行的朗读
   const old = document.getElementById('view');
   const fresh = document.createElement('main');
   fresh.className = 'view'; fresh.id = 'view';
@@ -111,7 +115,6 @@ function renderSideUser() {
         <strong>${escapeHTML(u.nickname || u.username)}</strong>
         <span>@${escapeHTML(u.username)}</span>
       </div>
-      ${u.local ? '' : `<button class="icon-btn side-logout" data-action="logout" type="button" title="退出登录">${icon('arrowRight', 15)}</button>`}
     </div>`;
 }
 
@@ -119,15 +122,49 @@ function escapeHTML(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/**
+ * 朗读：全站统一接管 [data-speak]（词/句）与 [data-speak-article]（整篇文章）。
+ * 用捕获阶段 —— 点到「听」时不会再触发它所在卡片 / 句子的点击（例如打开句子精讲）。
+ * 浏览器不支持 speechSynthesis 时给 <html> 加 .no-tts，CSS 会把所有听按钮隐藏。
+ */
+function bindTts() {
+  if (!ttsAvailable()) {
+    document.documentElement.classList.add('no-tts');
+    return;
+  }
+  document.addEventListener('click', (e) => {
+    const artBtn = e.target.closest('[data-speak-article]');
+    if (artBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const article = getState().articles.find((a) => a.id === artBtn.dataset.speakArticle);
+      if (article) speakSequence(splitForSpeech(article.text), { btn: artBtn });
+      return;
+    }
+    const el = e.target.closest('[data-speak]');
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    speakText(el.dataset.speak, { btn: el });
+  }, true);
+}
+
+bindTts();
+
 async function boot() {
-  // APK 内置版没有服务端，数据只存本机：跳过账号门槛
+  // APK 内置版没有服务端，数据只存本机：不走账号
   if (isNative()) {
     await startApp({ id: 'local', username: '本机', nickname: '本机用户', local: true });
     return;
   }
+  // 账号功能已暂时关闭：不再弹登录 / 注册，直接进入本机账号
   const me = await fetchMe();
   if (!me) {
-    showLoginGate(() => { boot().catch(console.error); });
+    document.getElementById('view').innerHTML = `
+      <div class="card">
+        <h2>未找到本机账号</h2>
+        <p class="small muted">账号功能已暂时关闭，免登录直接使用本机数据。但服务端没有可用账号，请检查 data/users.json，或把 server.js 里的 AUTH_PAUSED 改回 false 恢复登录。</p>
+      </div>`;
     return;
   }
   await startApp(me);
@@ -136,13 +173,6 @@ async function boot() {
 async function startApp(me) {
   buildNav();
   renderSideUser();
-  document.addEventListener('click', async (e) => {
-    const out = e.target.closest('[data-action="logout"]');
-    if (!out) return;
-    await logout();
-    location.hash = '#/home';
-    location.reload();
-  });
   document.getElementById('menuBtn').innerHTML = icon('menu', 20);
   document.getElementById('menuBtn').addEventListener('click', () => {
     if (document.getElementById('sidebar')?.classList.contains('open')) closeSidebar();

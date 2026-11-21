@@ -63,7 +63,7 @@ export function computeStats(state) {
   }
 
   return {
-    today,
+    todayKey: today,
     totalWords: words.length,
     mastered: buckets.mastered,
     buckets,

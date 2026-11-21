@@ -71,12 +71,13 @@ function card(w) {
     <div class="spread">
       <div style="min-width:0">
         <span class="word-term">${esc(w.term)}</span>
+        <button class="tts-btn" type="button" data-speak="${esc(w.term)}" title="听发音" aria-label="听 ${esc(w.term)} 的发音">${icon('volume', 14)}</button>
         ${w.phonetic ? `<span class="word-phonetic">${esc(w.phonetic)}</span>` : ''}
       </div>
       <span class="pill ${b.cls}">${b.label}</span>
     </div>
     <div class="word-meaning">${esc(w.meaning || '—')}${w.pos ? ` <span class="tiny muted">${esc(w.pos)}</span>` : ''}</div>
-    ${w.example ? `<div class="word-example">${esc(w.example)}</div>` : ''}
+    ${w.example ? `<div class="word-example">${esc(w.example)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(w.example)}" title="听例句" aria-label="听例句">${icon('volume', 12)}</button></div>` : ''}
     <div class="spread mt12">
       <div class="row tiny muted" style="gap:8px">
         <span>${w.srs?.seen || 0} 次练习</span><span>·</span>

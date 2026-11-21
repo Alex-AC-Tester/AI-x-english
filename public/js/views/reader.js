@@ -145,6 +145,7 @@ function articleCard(a) {
       <span>${icon('file', 12)} ${words} 词</span>
       <span>${icon('chat', 12)} ${explained} 句已讲</span>
       <span>${esc((a.createdAt || '').slice(0, 10))}</span>
+      <button class="btn btn-sm btn-ghost" data-speak-article="${a.id}" title="从头朗读全文" style="margin-left:auto">${icon('volume', 13)} 听全文</button>
     </div>
   </div>`;
 }
@@ -235,6 +236,7 @@ function renderRead() {
       <div style="flex:1"></div>
       <button class="btn btn-sm" data-action="articleAnalysis" ${analysisBusy ? 'disabled' : ''}>
         ${analysisBusy ? '<span class="loading"></span>' : `${icon('sparkles', 14)} ${a.analysis ? '重新分析' : 'AI 分析全文'}`}</button>
+      <button class="btn btn-sm" data-speak-article="${a.id}" title="从头朗读全文">${icon('volume', 14)} 听全文</button>
       ${mode === 'read' ? `<button class="btn btn-sm" data-action="goHistory">${icon('chat', 13)} 句库</button>` : ''}
       <button class="btn btn-sm btn-ghost" data-action="deleteArticle" title="删除文章">${icon('trash', 14)}</button>
     </div>
@@ -249,7 +251,7 @@ function renderRead() {
               const has = a.sentences && a.sentences[idx];
               const hard = hardMap.get(idx);
               const tip = hard ? `长难句 · ${hard.reason || ''}｜点这句开始精读` : '点这句，先自己翻，AI 再给提示';
-              return `<span class="sentence ${idx === activeIndex ? 'active' : ''} ${has ? 'explained' : ''} ${hard ? 'hard-sentence' : ''}" data-si="${idx}" title="${esc(tip)}">${esc(s)}</span>`;
+              return `<span class="sentence ${idx === activeIndex ? 'active' : ''} ${has ? 'explained' : ''} ${hard ? 'hard-sentence' : ''}" data-si="${idx}" title="${esc(tip)}">${esc(s)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(s)}" title="听这句" aria-label="听这句：${esc(s.slice(0, 40))}">${icon('volume', 13)}</button></span>`;
             }).join(' ')}</p>`).join('')}
         </article>
         <div class="selection-bar" id="selBar">
@@ -336,7 +338,7 @@ function renderExplanationPanel() {
         <div><h2>句子精讲</h2><div class="sub">${esc(coachSub(c))}</div></div>
         ${c.analysis ? `<button class="btn btn-sm btn-primary" data-action="vizModal">${icon('chart', 13)} 可视化讲解</button>` : icon('highlighter', 18)}
       </div>
-      <blockquote class="coach-sentence"><span class="coach-src">${c.index >= 0 ? '原句' : '划选'}</span>${esc(c.sentence)}</blockquote>
+      <blockquote class="coach-sentence"><span class="coach-src">${c.index >= 0 ? '原句' : '划选'}</span>${esc(c.sentence)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(c.sentence)}" title="听这句" aria-label="听这句">${icon('volume', 13)}</button></blockquote>
       ${c.cached && !c.turns.length && !c.analysis && !c.busy ? `<div class="coach-resume">
           <div class="tiny muted">上次的讲解还在缓存里，你可以先自己再翻一次，也可以直接看。</div>
           <div class="row mt8">
@@ -414,7 +416,10 @@ function renderCoachAnalysis(c) {
           ${w.phonetic ? `<div class="tiny muted">${esc(w.phonetic)} ${esc(w.pos || '')}</div>` : ''}
           <div class="small">${esc(w.meaning)}</div>
         </div>
-        <button class="btn btn-sm btn-ghost" data-action="addOneWord" data-i="${i}" title="加入词库">${icon('plus', 13)}</button>
+        <div style="text-align:right">
+          <button class="tts-btn" type="button" data-speak="${esc(w.term)}" title="听发音" aria-label="听 ${esc(w.term)}">${icon('volume', 14)}</button>
+          <button class="btn btn-sm btn-ghost" data-action="addOneWord" data-i="${i}" title="加入词库">${icon('plus', 13)}</button>
+        </div>
       </div>`).join('')}
     </div>` : ''}
     ${e.nlp ? `<div class="feedback mt12" style="border-left:3px solid var(--success)">
@@ -439,12 +444,15 @@ function renderAnalysis(an) {
         ${an.structure.map((s) => `<div class="small" style="margin:6px 0"><b>${esc(s.part)}</b> ${esc(s.gist)}<span class="tiny muted"> · ${esc(s.role)}</span></div>`).join('')}</div>` : ''}
       ${an.keyWords?.length ? `<div class="analysis-block"><h4>重点词汇（点击讲解并入库）</h4>
         ${an.keyWords.map((k, i) => `<span class="kw-chip" data-action="analysisWord" data-i="${i}">
-          <b>${esc(k.term)}</b><span class="kw-mean">${esc(k.meaning)}</span></span>`).join('')}</div>` : ''}
+          <b>${esc(k.term)}</b><span class="kw-mean">${esc(k.meaning)}</span><button class="tts-btn" type="button" data-speak="${esc(k.term)}" title="听发音" aria-label="听 ${esc(k.term)}">${icon('volume', 12)}</button></span>`).join('')}</div>` : ''}
       ${an.hardSentences?.length ? `<div class="analysis-block"><h4>长难句 · 点开逐句精读</h4>
         ${an.hardSentences.map((s) => `<div class="hard-sentence">
           <div class="hs-text">${esc(s.text)}</div>
           <div class="tiny muted">${esc(s.reason)}</div>
-          <button class="btn btn-sm btn-ghost" data-action="coachHard" data-text="${esc(s.text)}">${icon('highlighter', 12)} 我自己翻这句</button>
+          <div class="row" style="gap:6px">
+            <button class="btn btn-sm btn-ghost" data-action="coachHard" data-text="${esc(s.text)}">${icon('highlighter', 12)} 我自己翻这句</button>
+            <button class="btn btn-sm btn-ghost" type="button" data-speak="${esc(s.text)}">${icon('volume', 12)} 听这句</button>
+          </div>
         </div>`).join('')}</div>` : ''}
       ${an.highlights?.length ? `<div class="analysis-block"><h4>写作亮点</h4><ul>${an.highlights.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
       ${an.quiz?.length ? `<div class="analysis-block"><h4>理解思考题</h4>
@@ -672,7 +680,12 @@ function finishCoach(analysis) {
 
 /* ---------- 渲染入口 ---------- */
 
-export function render() {
+export function render(params = {}) {
+  // 支持从首页直接打开某一篇：#/reader?id=xxx
+  if (params.id) {
+    const a = getArticle(params.id);
+    if (a) { currentId = a.id; mode = 'read'; }
+  }
   return mode === 'read' && currentId ? renderRead() : renderList();
 }
 

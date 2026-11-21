@@ -6,9 +6,10 @@ import { isNative } from '../bridge.js';
 import { nlpStatus } from '../nlp.js';
 import { refresh } from '../router.js';
 import { mdxStatus, uploadMdxFile, importMdx, deleteMdxDict, formatBytes, clearMdxCache } from '../mdx.js';
+import { ttsAvailable, englishVoices, getVoiceURI, setVoice, getRate, setRate, speak, RATE_OPTIONS, onVoicesReady } from '../tts.js';
 
 export const title = '设置';
-export const subtitle = 'API Key、本地 NLP、提醒与数据管理';
+export const subtitle = 'API Key、本地 NLP、朗读、提醒与数据管理';
 
 let models = [];
 let modelLoading = false;
@@ -20,6 +21,7 @@ let mdxLoaded = false;
 let mdxLib = true;
 let mdxBusy = null;   // { phase, pct, detail }
 let lanInfo = null;   // { port, host, lan, hostname, primary, addresses }
+let voiceWired = false;
 
 export function render() {
   if (!permLoaded) {
@@ -41,6 +43,9 @@ export function render() {
   }
   const s = getSettings();
   const state = getState();
+  const voices = ttsAvailable() ? englishVoices() : [];
+  const ttsVoiceURI = getVoiceURI();
+  const ttsRate = getRate();
   return `
     <div class="grid grid-2">
       <div>
@@ -87,6 +92,33 @@ export function render() {
             </select>
           </div>
           <div class="feedback">${icon('info', 14)} 系统优先安排待复习词与掌握度低的词，答对后自动拉长复习间隔，答错则 10 分钟后重排。</div>
+        </section>
+
+        <section class="card mt16">
+          <div class="card-head"><div><h2>朗读</h2><div class="sub">用系统自带语音读单词、句子和整篇文章，零依赖、不下载模型、不联网</div></div>${icon('volume', 18)}</div>
+          ${ttsAvailable() ? `
+            <div class="spread">
+              <div><strong class="small">朗读引擎</strong>
+                <div class="tiny muted">${voices.length ? `系统里有 ${voices.length} 个英文语音可选` : '正在读取系统语音列表…（首次可能要等一下）'}</div></div>
+              <span class="pill success">可用</span>
+            </div>
+            <div class="field mt16"><label>英文语音</label>
+              <select class="select" data-tts-setting="voice">
+                <option value="">自动选择（推荐）</option>
+                ${voices.map((v) => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === ttsVoiceURI ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}${v.localService ? '' : ' · 在线'}</option>`).join('')}
+              </select>
+              <span class="tiny muted">列表来自系统已安装的语音包；手机可在系统「设置 → 辅助功能 / 语言」里下载英文语音</span>
+            </div>
+            <div class="field"><label>语速</label>
+              <select class="select" data-tts-setting="rate">
+                ${RATE_OPTIONS.map(([v, label]) => `<option value="${v}" ${Math.abs(ttsRate - v) < 0.01 ? 'selected' : ''}>${label}（${v}×）</option>`).join('')}
+              </select>
+            </div>
+            <div class="row mt12">
+              <button class="btn" data-action="ttsTest">${icon('volume', 14)} 试听</button>
+              <span class="tiny muted">正文每句、词库每个词后面都有「听」，再点一次停止</span>
+            </div>
+          ` : `<div class="feedback mt12">${icon('info', 14)} 当前浏览器不支持 speechSynthesis，换 Chrome / Edge / Safari 即可使用朗读。</div>`}
         </section>
 
         <section class="card mt16">
@@ -182,6 +214,19 @@ export function render() {
 export function mount() {
   const view = document.getElementById('view');
 
+  // 系统语音列表是异步加载的（Chrome 首次要等 voiceschanged），就绪后再刷新一次下拉框
+  if (!voiceWired) {
+    voiceWired = true;
+    onVoicesReady(() => refresh());
+  }
+
+  view.addEventListener('change', (e) => {
+    const kind = e.target?.dataset?.ttsSetting;
+    if (!kind) return;
+    if (kind === 'voice') setVoice(e.target.value);
+    if (kind === 'rate') setRate(Number(e.target.value));
+  });
+
   if (!models.length && !modelLoading) {
     modelLoading = true;
     listModels().then((list) => { models = list; modelLoading = false; refresh(); })
@@ -213,6 +258,10 @@ export function mount() {
     if (!btn) return;
     const a = btn.dataset.action;
 
+    if (a === 'ttsTest') {
+      speak('Reading slowly is a habit worth keeping.', { btn });
+      return;
+    }
     if (a === 'testNlp') {
       toast('正在分析测试句…', 'info');
       try {

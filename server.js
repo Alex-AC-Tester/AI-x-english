@@ -20,6 +20,16 @@ const dict = require('./dict');
 const mdx = require('./mdx');
 const auth = require('./auth');
 
+/**
+ * 账号功能临时开关
+ * - true ：暂停「注册 / 登录」，接口直接拒绝；前端免登录，自动进入首个本机账号，
+ *          学习数据仍按账号文件读写，不会丢。
+ * - false：恢复完整账号体系（注册 / 登录 / 退出），同时需还原 public/js/login-screen.js
+ *          与 public/js/app.js 里的登录门槛。
+ * 暂时关掉的是入口，账号与数据文件都还在，随时可以改回 false。
+ */
+const AUTH_PAUSED = true;
+
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -428,10 +438,16 @@ const server = http.createServer(async (req, res) => {
   try {
     const token = auth.tokenFrom(req);
     const sessionHit = token ? auth.findSession(token) : null;
-    const currentUser = sessionHit ? auth.publicUser(sessionHit.user) : null;
+    let currentUser = sessionHit ? auth.publicUser(sessionHit.user) : null;
+    // 免登录模式：没有有效会话时自动落到本机账号，接口照常读写该账号的学习数据
+    if (!currentUser && AUTH_PAUSED) {
+      const local = auth.localUser();
+      if (local) currentUser = Object.assign(auth.publicUser(local), { local: true });
+    }
 
     /* ---------- 账号与会话 ---------- */
     if (req.method === 'POST' && p === '/api/auth/register') {
+      if (AUTH_PAUSED) { send(res, 403, { ok: false, error: '注册功能已暂时关闭' }); return; }
       const body = await readJsonBody(req, 64 * 1024);
       try {
         const user = auth.register(body);
@@ -443,6 +459,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && p === '/api/auth/login') {
+      if (AUTH_PAUSED) { send(res, 403, { ok: false, error: '登录功能已暂时关闭' }); return; }
       const body = await readJsonBody(req, 64 * 1024);
       try {
         const user = auth.login(body);
@@ -459,7 +476,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && p === '/api/auth/me') {
-      send(res, 200, { ok: true, user: currentUser });
+      send(res, 200, { ok: true, user: currentUser, authPaused: AUTH_PAUSED });
       return;
     }
 

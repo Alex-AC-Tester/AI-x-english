@@ -1,8 +1,8 @@
-const CACHE = 'wordwise-v16';
+const CACHE = 'wordwise-v18';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './icons/icon.svg', './css/styles.css',
   './js/app.js', './js/ai.js', './js/bridge.js', './js/dict.js', './js/mdx.js', './js/gaokao.js',
-  './js/ebook.js',
+  './js/ebook.js', './js/tts.js',
   './js/reminder.js', './js/router.js', './js/srs.js',
   './js/stats.js', './js/store.js', './js/ui.js', './js/viz.js',
   './js/views/home.js', './js/views/import.js', './js/views/words.js', './js/views/learn.js',

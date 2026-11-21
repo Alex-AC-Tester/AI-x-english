@@ -168,7 +168,7 @@ function renderStudy() {
   if (!q) return renderDone();
   const pct = Math.round(idx / queue.length * 100);
   const prompt = q.mode === 'w2m'
-    ? `<div class="learn-word">${esc(q.word.term)}</div>
+    ? `<div class="learn-word">${esc(q.word.term)}<button class="tts-btn" type="button" data-speak="${esc(q.word.term)}" title="听发音" aria-label="听 ${esc(q.word.term)} 的发音">${icon('volume', 18)}</button></div>
        <div class="learn-phonetic">${esc(q.word.phonetic || builtinLookup(q.word.term)?.phonetic || '')} ${esc(q.word.pos || '')}</div>
        <div class="learn-hint">选出正确的中文释义</div>`
     : `<div class="learn-meaning">${esc(q.word.meaning)}</div>
@@ -188,7 +188,7 @@ function renderStudy() {
   const feedback = answered ? `
     <div class="learn-feedback ${answered.ok ? 'ok' : 'no'}">
       <b>${answered.ok ? '回答正确' : '再记一下'}</b>
-      <div>${esc(q.word.term)} ${esc(q.word.phonetic || '')} ${esc(q.word.pos || '')} —— ${esc(q.word.meaning)}</div>
+      <div><b>${esc(q.word.term)}</b><button class="tts-btn" type="button" data-speak="${esc(q.word.term)}" title="听发音" aria-label="听 ${esc(q.word.term)} 的发音">${icon('volume', 13)}</button> ${esc(q.word.phonetic || '')} ${esc(q.word.pos || '')} —— ${esc(q.word.meaning)}</div>
       ${q.word.example ? `<div class="learn-example">${esc(q.word.example)}</div>` : ''}
       <button class="btn btn-primary btn-sm mt12" data-act="next">${idx + 1 >= queue.length ? '查看结果' : '下一个'} ${icon('arrowRight', 13)}</button>
     </div>` : '';
@@ -226,7 +226,7 @@ function renderDone() {
     ${wrongList.length ? `<section class="card mt16">
       <div class="card-head"><div><h2>需要复习</h2><div class="sub">这些词答错过，已安排优先重练</div></div></div>
       <div class="grid grid-2">${wrongList.map((w) => `<div class="learn-wrong">
-        <b>${esc(w.term)}</b><span class="tiny muted">${esc(w.phonetic || '')}</span>
+        <b>${esc(w.term)}</b><button class="tts-btn" type="button" data-speak="${esc(w.term)}" title="听发音" aria-label="听 ${esc(w.term)} 的发音">${icon('volume', 12)}</button><span class="tiny muted">${esc(w.phonetic || '')}</span>
         <div class="small">${esc(w.meaning)}</div></div>`).join('')}</div>
     </section>` : ''}`;
 }

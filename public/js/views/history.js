@@ -65,6 +65,7 @@ function card(h, i) {
     <div class="hist-trans">${esc((h.translation || '').slice(0, 160))}</div>
     <div class="row mt8" style="gap:6px">
       <button class="btn btn-sm" data-action="view" data-id="${h.id}">${icon('eye', 13)} 可视化回顾</button>
+      <button class="btn btn-sm btn-ghost" type="button" data-speak="${esc(h.sentence)}">${icon('volume', 13)} 听这句</button>
       <button class="btn btn-sm btn-ghost" data-action="del" data-id="${h.id}" style="color:var(--danger)">${icon('trash', 13)}</button>
     </div>
   </div>`;

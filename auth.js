@@ -37,6 +37,50 @@ function loadUsers() {
 }
 function saveUsers(list) { writeJsonAtomic(USERS_FILE, list); }
 
+/**
+ * 免登录模式使用的本机账号：取账号表里的第一个账号；
+ * 一个都没有时创建一个无密码的本地账号（id 固定），保证学习数据有地方落盘。
+ */
+function localUser() {
+  const users = loadUsers();
+  if (users.length) return users[0];
+  const user = {
+    id: 'u_local',
+    username: 'local',
+    nickname: '本机用户',
+    salt: '',
+    hash: '',
+    createdAt: new Date().toISOString(),
+    lastLoginAt: null
+  };
+  users.push(user);
+  saveUsers(users);
+  return user;
+}
+
+/**
+ * 删除一个账号及其学习数据：账号表条目、data/users/<id>.json、该账号的会话。
+ * 词典数据（data/dict、data/mdx）不属于账号数据，不在删除范围内。
+ */
+function removeAccount(userId) {
+  const id = String(userId || '').trim();
+  if (!id) return { ok: false, error: '缺少账号 id' };
+  const users = loadUsers();
+  const hit = users.find((u) => u.id === id);
+  if (!hit) return { ok: false, error: '账号不存在' };
+
+  saveUsers(users.filter((u) => u.id !== id));
+  writeJsonAtomic(SESSIONS_FILE, loadSessions().filter((s) => s.userId !== id));
+
+  const file = storeFile(id);
+  let dataRemoved = false;
+  try {
+    if (fs.existsSync(file)) { fs.unlinkSync(file); dataRemoved = true; }
+  } catch (_) { /* 文件删不掉时保留账号删除结果，由调用方看日志 */ }
+
+  return { ok: true, id, username: hit.username, dataRemoved };
+}
+
 function hashPassword(password, salt) {
   return crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 64).toString('hex');
 }
@@ -182,6 +226,8 @@ module.exports = {
   COOKIE_NAME,
   register,
   login,
+  localUser,
+  removeAccount,
   publicUser,
   createSession,
   findSession,

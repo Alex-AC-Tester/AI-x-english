@@ -38,7 +38,7 @@ export function render() {
     ${mdxEntry ? `<section class="card mt16">
       <div class="card-head">
         <div>
-          <h2>${esc(mdxEntry.key)} <span class="mdx-tag">${esc(mdxEntry.dict.name)}</span></h2>
+          <h2>${esc(mdxEntry.key)} <button class="tts-btn" type="button" data-speak="${esc(mdxEntry.key)}" title="听发音" aria-label="听 ${esc(mdxEntry.key)} 的发音">${icon('volume', 15)}</button> <span class="mdx-tag">${esc(mdxEntry.dict.name)}</span></h2>
           <div class="sub">${mdxEntry.matched === 'variant' ? `词形还原自「${esc(query)}」 · ` : ''}来自导入的 MDX 词典</div>
         </div>
         <button class="btn btn-sm" data-action="addMdx">${icon('plusCircle', 13)} 加入我的词库</button>
@@ -66,7 +66,7 @@ function renderResult() {
   // 内置词库结构：term / phonetic / pos / meaning / example
   return `
     <div class="card-head">
-      <div><h2>${esc(d.term)} <span class="pill ${result.source === 'builtin' ? 'primary' : 'success'}">${result.source === 'builtin' ? '内置高考词库' : '我的词库'}</span></h2>
+      <div><h2>${esc(d.term)} <button class="tts-btn" type="button" data-speak="${esc(d.term)}" title="听发音" aria-label="听 ${esc(d.term)} 的发音">${icon('volume', 15)}</button> <span class="pill ${result.source === 'builtin' ? 'primary' : 'success'}">${result.source === 'builtin' ? '内置高考词库' : '我的词库'}</span></h2>
         <div class="sub">${esc(d.phonetic || '')} ${esc(d.pos || '')}</div></div>
       <div class="row">
         ${result.source === 'builtin' ? `<button class="btn btn-sm btn-primary" data-action="deepAi">${icon('sparkles', 13)} AI 深度讲解</button>` : ''}
@@ -75,7 +75,7 @@ function renderResult() {
     </div>
     <div class="lookup-result">
       <div class="def-item"><span class="small">${esc(d.meaning || '暂无释义')}</span></div>
-      ${d.example ? `<div class="def-item"><span class="def-pos">例句</span><div style="font-family:Georgia,serif">${esc(d.example)}</div></div>` : ''}
+      ${d.example ? `<div class="def-item"><span class="def-pos">例句</span><div style="font-family:Georgia,serif">${esc(d.example)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(d.example)}" title="听例句" aria-label="听例句">${icon('volume', 12)}</button></div></div>` : ''}
     </div>
     ${renderAiBlock()}
   `;
@@ -84,7 +84,7 @@ function renderResult() {
 function renderAiResult(d) {
   return `
     <div class="card-head">
-      <div><h2>${esc(d.term)} ${d.phonetic ? `<span class="pill">${esc(d.phonetic)}</span>` : ''}</h2>
+      <div><h2>${esc(d.term)} <button class="tts-btn" type="button" data-speak="${esc(d.term)}" title="听发音" aria-label="听 ${esc(d.term)} 的发音">${icon('volume', 15)}</button> ${d.phonetic ? `<span class="pill">${esc(d.phonetic)}</span>` : ''}</h2>
         <div class="sub">${esc(d.pos || '')} ${d.level ? `· ${esc(d.level)}` : ''} · AI 深度讲解</div></div>
       <button class="btn btn-sm btn-primary" data-action="addBuiltin">${icon('plusCircle', 13)} 加入我的词库</button>
     </div>
@@ -92,7 +92,7 @@ function renderAiResult(d) {
       ${d.root ? `<div class="feedback">${icon('info', 13)} 词根词缀：${esc(d.root)}</div>` : ''}
       ${(d.meanings || []).map((m) => `<div class="def-item">
         <span class="def-pos">${esc(m.pos || '')}</span> <strong>${esc(m.meaning || '')}</strong>
-        ${m.example ? `<div class="def-ex">${esc(m.example)} — ${esc(m.translation || '')}</div>` : ''}
+        ${m.example ? `<div class="def-ex">${esc(m.example)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(m.example)}" title="听例句" aria-label="听例句">${icon('volume', 12)}</button> — ${esc(m.translation || '')}</div>` : ''}
       </div>`).join('')}
       ${d.collocations?.length ? `<div class="def-item"><span class="def-pos">常见搭配</span>
         <div class="small">${d.collocations.map(esc).join(' · ')}</div></div>` : ''}

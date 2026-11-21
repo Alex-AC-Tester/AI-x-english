@@ -1,121 +1,141 @@
 import { getState } from '../store.js';
 import { computeStats } from '../stats.js';
-import { icon, esc, dateKey, fmtDate } from '../ui.js';
-import { GAOKAO_WORDS } from '../gaokao.js';
+import { icon, esc, fmtDate } from '../ui.js';
 import { go } from '../router.js';
 
-export const title = '今日';
-export const subtitle = '文章精读 · 单词速查 · AI 出题 · 即时反馈';
+export const title = '今天';
+export const subtitle = '学习记录与接下来要做的事';
+
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
 export function render() {
   const state = getState();
   const st = computeStats(state);
-  const quiz = state.quizzes.find((q) => q.date === st.today);
+  const now = new Date();
+
+  const quiz = state.quizzes.find((q) => q.date === st.todayKey);
   const attempt = quiz ? state.attempts.find((a) => a.quizId === quiz.id) : null;
-  const hour = new Date().getHours();
-  const greet = hour < 6 ? '夜深了' : hour < 11 ? '早上好' : hour < 14 ? '中午好' : hour < 19 ? '下午好' : '晚上好';
+
+  const articles = [...state.articles]
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
+    .slice(0, 5);
+
+  // 一句话说清今天的状态：只陈述事实，不做鼓励。
+  const bits = [];
+  if (st.dueCount) bits.push(`${st.dueCount} 个词到期`);
+  if (!quiz) bits.push('今天的卷子还没出');
+  else if (!attempt) bits.push('今天的卷子还没做完');
+  if (st.today.questions) bits.push(`已做 ${st.today.questions} 题`);
+  const lead = bits.length ? `${bits.join('，')}。` : '今天没有到期的词，也没有待完成的卷子。';
+
+  const attempts = [...state.attempts]
+    .sort((a, b) => String(b.finishedAt || '').localeCompare(String(a.finishedAt || '')))
+    .slice(0, 5);
 
   return `
-    <section class="hero">
-      <div class="hero-eyebrow">${icon('calendar', 12)} ${fmtDate(new Date().toISOString())} · 今日学习</div>
-      <h2>${greet}，今天读一段，记几个词。</h2>
-      <p>导入一篇文章，选中句子让 AI 精讲并提取重点词；也可直接查词。每天一份定制小卷，做完立刻批改反馈。</p>
-      <div class="hero-actions">
-        <button class="btn btn-primary" data-action="reader">${icon('reader')} 读一篇文章</button>
-        <button class="btn btn-light" data-action="lookup">${icon('searchWord')} 查词</button>
-        ${attempt
-          ? `<button class="btn btn-light" data-action="result" data-id="${attempt.id}">${icon('check')} 今日批改</button>`
-          : `<button class="btn btn-light" data-action="take">${icon('play')} ${quiz ? '继续试卷' : '生成试卷'}</button>`}
+    <div class="page-lead">
+      <div>
+        <p class="lead-date">${now.getMonth() + 1}月${now.getDate()}日 · 星期${WEEK[now.getDay()]}</p>
+        <h2 class="lead-line">${lead}</h2>
       </div>
-    </section>
-
-    <div class="grid grid-4 keep mt16">
-      ${statCard('词库总量', st.totalWords, `${st.dueCount} 个待复习`, 'book', 'var(--primary-soft)', 'var(--primary)')}
-      ${statCard('已掌握', st.mastered, `平均掌握度 ${st.masteryAvg}%`, 'target', 'var(--success-soft)', 'var(--success)')}
-      ${statCard('今日正确率', st.today.accuracy === null ? '—' : `${st.today.accuracy}%`, `${st.today.questions} 题已作答`, 'chart', 'var(--warn-soft)', 'var(--warn)')}
-      ${statCard('连续打卡', `${st.streak} 天`, `累计 ${st.totalQuizzes} 份试卷`, 'flame', 'var(--danger-soft)', 'var(--danger)')}
+      <div class="lead-actions">
+        <button class="btn" data-action="import" type="button">${icon('plus', 15)} 导入文章</button>
+        <button class="btn btn-primary" data-action="lookup" type="button">查一个词</button>
+      </div>
     </div>
 
-    <div class="grid grid-2 mt16">
-      <section class="card" style="cursor:pointer" data-action="reader">
-        <div class="card-head"><div><h2>文章精读</h2><div class="sub">导入 · 选中 · AI 讲解 · 入库一条龙</div></div>${icon('reader', 18)}</div>
-        <div class="flow-step"><span class="flow-num">1</span><div><strong>导入文章</strong><span>粘贴文本、上传 TXT 或多图拍照 OCR</span></div></div>
-        <div class="flow-step"><span class="flow-num">2</span><div><strong>选中句子</strong><span>点句子或划选，AI 给翻译、结构与语法</span></div></div>
-        <div class="flow-step"><span class="flow-num">3</span><div><strong>重点词入库</strong><span>讲到的重点词一键收进词库</span></div></div>
-        <div class="tiny muted mt12">已导入 ${state.articles.length} 篇文章 · 点击进入阅读器 ${icon('arrowRight', 12)}</div>
-      </section>
+    <div class="ledger">
+      <div><span>词库</span><b>${st.totalWords}<em>${st.dueCount} 个到期</em></b></div>
+      <div><span>已掌握</span><b>${st.mastered}<em>平均 ${st.masteryAvg}%</em></b></div>
+      <div><span>今日正确率</span><b>${st.today.accuracy === null ? '—' : st.today.accuracy + '%'}<em>${st.today.questions} 题</em></b></div>
+      <div><span>连续</span><b>${st.streak}<em>天</em></b></div>
+    </div>
 
-      <section class="card" style="cursor:pointer" data-action="lookup">
-        <div class="card-head"><div><h2>单词速查</h2><div class="sub">内置高考词库即输即查</div></div>${icon('searchWord', 18)}</div>
-        <div class="grid grid-2 keep mt12">
-          <div class="stat-card"><div class="stat-label">内置词条</div><div class="stat-value">${GAOKAO_WORDS.length}</div><div class="stat-foot">离线可查</div></div>
-          <div class="stat-card"><div class="stat-label">我的词库</div><div class="stat-value">${st.totalWords}</div><div class="stat-foot">持续积累</div></div>
+    <div class="grid home-main">
+      <div class="home-col">
+        <section class="card">
+          <div class="card-head">
+            <div><h2>文章</h2></div>
+            <button class="btn btn-sm" data-action="reader" type="button">全部 ${icon('arrowRight', 13)}</button>
+          </div>
+          ${articles.length ? articles.map((a) => `
+            <div class="art-row">
+              <button class="list-row as-btn" data-action="open" data-id="${esc(a.id)}" type="button">
+                <div class="row-main">
+                  <div class="art-title">${esc(a.title || '未命名')}</div>
+                  <div class="row-meta">${wordCount(a.text)} 词 · ${fmtDate(a.updatedAt || a.createdAt)}</div>
+                </div>
+                ${icon('arrowRight', 14)}
+              </button>
+              <button class="tts-btn" type="button" data-speak-article="${esc(a.id)}" title="听全文" aria-label="听全文：${esc(a.title || '未命名')}">${icon('volume', 14)}</button>
+            </div>`).join('') : `
+            <p class="row-empty">还没有导入文章。粘贴一段英文，或上传 txt / 拍照。</p>`}
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div><h2>试卷记录</h2></div>
+            <button class="btn btn-sm" data-action="quizzes" type="button">全部 ${icon('arrowRight', 13)}</button>
+          </div>
+          ${attempts.length ? `
+            <table class="table">
+              <thead><tr><th>日期</th><th>试卷</th><th class="num">题数</th><th class="num">正确率</th><th class="num">用时</th></tr></thead>
+              <tbody>
+                ${attempts.map((a) => {
+                  const q = state.quizzes.find((x) => x.id === a.quizId);
+                  return `<tr data-action="result" data-id="${esc(a.id)}" class="clickable">
+                    <td>${fmtDate(a.finishedAt)}</td>
+                    <td>${esc(q?.title || '练习卷')}</td>
+                    <td class="num">${a.answers?.length || 0}</td>
+                    <td class="num">${a.accuracy ?? 0}%</td>
+                    <td class="num">${Math.max(1, Math.round((a.durationMs || 0) / 60000))} 分</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>` : `
+            <p class="row-empty">还没有做过试卷。${quiz ? '今天的卷子已经出好了。' : ''}</p>`}
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <div><h2>薄弱的词</h2></div>
+          ${st.dueCount ? `<button class="btn btn-sm" data-action="learn" type="button">开始复习</button>` : ''}
         </div>
-        <div class="feedback mt16">${icon('info', 14)} 查不到时可让 AI 深度讲解词根词缀、搭配与例句，再一键加入词库。</div>
+        ${st.weak.length ? st.weak.slice(0, 7).map((w) => `
+          <div class="list-row">
+            <div class="row-main">
+              <div class="word-term">${esc(w.term)}<button class="tts-btn" type="button" data-speak="${esc(w.term)}" title="听发音" aria-label="听 ${esc(w.term)} 的发音">${icon('volume', 12)}</button></div>
+              <div class="row-meta">${esc(w.meaning || '暂无释义')}</div>
+            </div>
+            <div class="row-side">
+              <span class="mastery-bar"><i style="width:${Math.max(2, w.mastery)}%;background:${w.mastery >= 50 ? 'var(--primary)' : 'var(--danger)'}"></i></span>
+              <span class="tiny muted">${w.mastery}%</span>
+            </div>
+          </div>`).join('') : `
+          <p class="row-empty">词库里还没有词。查一个词，或从文章里收几个。</p>`}
       </section>
     </div>
-
-    <section class="card mt16">
-      <div class="card-head">
-        <div><h2>待复习 / 薄弱词</h2><div class="sub">优先安排进下一份试卷</div></div>
-        <button class="btn btn-sm" data-action="words">全部词库 ${icon('arrowRight', 13)}</button>
-      </div>
-      ${st.weak.length ? st.weak.slice(0, 6).map((w) => `
-        <div class="list-row">
-          <div class="avatar">${esc(w.term.slice(0, 1).toUpperCase())}</div>
-          <div style="flex:1;min-width:0">
-            <div class="word-term">${esc(w.term)}</div>
-            <div class="small muted">${esc(w.meaning || '暂无释义')}</div>
-          </div>
-          <div style="text-align:right">
-            <div class="small ${w.mastery >= 50 ? '' : 'muted'}" style="font-weight:600;color:${w.mastery >= 50 ? 'var(--primary)' : 'var(--danger)'}">${w.mastery}%</div>
-            <div class="tiny muted">掌握度</div>
-          </div>
-        </div>`).join('') : emptyMini('还没有学习数据，先导入一批单词吧', 'import')}
-    </section>
-
-    <section class="card mt16">
-      <div class="card-head"><div><h2>最近试卷</h2><div class="sub">每次作答都会记录并更新复习计划</div></div><button class="btn btn-sm" data-action="quizzes">查看全部 ${icon('arrowRight', 13)}</button></div>
-      ${state.attempts.length ? `
-        <div class="grid grid-3">
-          ${[...state.attempts].sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt))).slice(0, 3).map((a) => `
-            <div class="list-row" style="padding:12px 0;gap:10px">
-              <div style="flex:1;min-width:0">
-                <strong class="small">${fmtDate(a.finishedAt, true)}</strong>
-                <div class="tiny muted mt8">${a.answers?.length || 0} 题 · ${Math.round((a.score || 0))} 分</div>
-              </div>
-              <span class="pill ${a.accuracy >= 80 ? 'success' : a.accuracy >= 60 ? 'warn' : 'danger'}">${a.accuracy || 0}%</span>
-            </div>`).join('')}
-        </div>` : emptyMini('完成第一份试卷后，这里会显示记录', 'take')}
-    </section>
   `;
 }
 
-function statCard(label, value, foot, iconName, bg, color) {
-  return `<div class="stat-card">
-    <div class="stat-icon" style="background:${bg};color:${color}">${icon(iconName, 16)}</div>
-    <div class="stat-label">${label}</div>
-    <div class="stat-value">${value}</div>
-    <div class="stat-foot">${esc(foot)}</div>
-  </div>`;
-}
-
-function emptyMini(text, action) {
-  return `<div class="empty" style="padding:26px 10px">${icon('layers', 30)}<h3>${esc(text)}</h3>
-    <button class="btn btn-primary btn-sm" data-action="${action}">${action === 'take' ? '生成试卷' : '去导入'}</button></div>`;
+function wordCount(text) {
+  return String(text || '').split(/\s+/).filter(Boolean).length;
 }
 
 export function mount() {
   document.getElementById('view').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    const a = btn.dataset.action;
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+    const a = target.dataset.action;
     if (a === 'import') go('import');
     else if (a === 'reader') go('reader');
+    else if (a === 'open') go('reader', { id: target.dataset.id });
     else if (a === 'lookup') go('lookup');
     else if (a === 'words') go('words');
     else if (a === 'quizzes') go('quiz');
+    else if (a === 'learn') go('learn');
     else if (a === 'take') go('quiz', { mode: 'take' });
-    else if (a === 'result') go('quiz', { mode: 'result', id: btn.dataset.id });
+    else if (a === 'result') go('quiz', { mode: 'result', id: target.dataset.id });
   });
 }
