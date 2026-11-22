@@ -1,7 +1,7 @@
 import { getState, addWords, updateWord, deleteWord, saveQuiz } from '../store.js';
 import { mastery, masteryBucket, isDue } from '../srs.js';
 import { icon, esc, toast, modal, confirmDialog, dateKey } from '../ui.js';
-import { go } from '../router.js';
+import { go, refresh } from '../router.js';
 
 let filter = 'all';
 let keyword = '';
@@ -132,7 +132,7 @@ export function mount() {
       const w = getState().words.find((x) => x.id === editBtn.dataset.edit);
       const v = await modal({ title: '编辑词条', body: wordForm(w), wide: true,
         actions: [{ label: '取消', value: null }, { label: '保存', cls: 'btn-primary', value: (ov) => readForm(ov) }] });
-      if (v?.term) { updateWord(w.id, v); toast('已保存', 'success'); }
+      if (v?.term) { updateWord(w.id, v); toast('已保存', 'success'); refresh(); }
       return;
     }
 
@@ -153,7 +153,7 @@ export function mount() {
     if (a === 'add') {
       const v = await modal({ title: '手动添加词条', body: wordForm(), wide: true,
         actions: [{ label: '取消', value: null }, { label: '保存', cls: 'btn-primary', value: (ov) => readForm(ov) }] });
-      if (v?.term) { addWords([v]); toast('已添加', 'success'); }
+      if (v?.term) { addWords([v]); toast('已添加', 'success'); refresh(); }
     }
     if (a === 'makeQuiz') {
       const list = filtered();
