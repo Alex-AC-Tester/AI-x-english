@@ -7,7 +7,7 @@ const ASSETS = [
   './js/auth.js', './js/dict.js', './js/mdx.js', './js/gaokao.js',
   './js/ebook.js', './js/tts.js',
   './js/reminder.js', './js/router.js', './js/srs.js',
-  './js/backtrans.js', './js/hardsent.js', './js/nlp.js', './js/structtree.js',
+  './js/backtrans.js', './js/hardsent.js', './js/nlp.js', './js/profile.js', './js/structtree.js',
   './js/stats.js', './js/store.js', './js/ui.js', './js/viz.js',
   './js/views/home.js', './js/views/import.js', './js/views/words.js', './js/views/learn.js',
   './js/views/reader.js', './js/views/history.js', './js/views/lookup.js',

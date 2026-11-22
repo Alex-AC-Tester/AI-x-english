@@ -14,5 +14,9 @@
   "dependencies": {
     "js-mdict": "^7.0.0",
     "jszip": "^3.7.1"
+  },
+  "devDependencies": {
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.5.438"
   }
 }
