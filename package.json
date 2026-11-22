@@ -1,6 +1,6 @@
 {
   "name": "wordwise-ai",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "AI 驱动的文章精读与背单词应用（本地 Node 版）",
   "main": "server.js",
