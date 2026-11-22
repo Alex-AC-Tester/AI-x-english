@@ -4,7 +4,6 @@ const PATHS = {
   user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
   lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   wifi: '<path d="M4.5 11.5a11 11 0 0 1 15 0"/><path d="M8 15a6 6 0 0 1 8 0"/><circle cx="12" cy="18.5" r="1.1"/>',
-  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/>',
@@ -169,8 +168,16 @@ export function pickFile(accept = 'image/*', capture = false) {
     input.multiple = false;
     if (capture) input.setAttribute('capture', 'environment');
     else input.removeAttribute('capture');
-    const onChange = () => { input.removeEventListener('change', onChange); resolve(input.files?.[0] || null); };
+    const done = (value) => {
+      input.removeEventListener('change', onChange);
+      input.removeEventListener('cancel', onCancel);
+      resolve(value);
+    };
+    const onChange = () => done(input.files?.[0] || null);
+    // 用户取消选择时部分浏览器不触发 change，必须监听 cancel，否则 Promise 永不 resolve 且监听器残留
+    const onCancel = () => done(null);
     input.addEventListener('change', onChange);
+    input.addEventListener('cancel', onCancel);
     input.click();
   });
 }
@@ -182,8 +189,15 @@ export function pickFiles(accept = 'image/*', multiple = true) {
     input.accept = accept;
     input.multiple = multiple;
     input.removeAttribute('capture');
-    const onChange = () => { input.removeEventListener('change', onChange); resolve([...(input.files || [])]); };
+    const done = (value) => {
+      input.removeEventListener('change', onChange);
+      input.removeEventListener('cancel', onCancel);
+      resolve(value);
+    };
+    const onChange = () => done([...(input.files || [])]);
+    const onCancel = () => done([]);
     input.addEventListener('change', onChange);
+    input.addEventListener('cancel', onCancel);
     input.click();
   });
 }

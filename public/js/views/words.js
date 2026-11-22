@@ -1,6 +1,6 @@
 import { getState, addWords, updateWord, deleteWord, saveQuiz } from '../store.js';
 import { mastery, masteryBucket, isDue } from '../srs.js';
-import { icon, esc, toast, modal, confirmDialog } from '../ui.js';
+import { icon, esc, toast, modal, confirmDialog, dateKey } from '../ui.js';
 import { go } from '../router.js';
 
 let filter = 'all';
@@ -159,7 +159,7 @@ export function mount() {
       const list = filtered();
       if (list.length < 2) { toast('至少需要 2 个词条', 'error'); return; }
       const quiz = {
-        id: `q_${Date.now().toString(36)}`, date: new Date().toLocaleDateString('sv-SE'),
+        id: `q_${Date.now().toString(36)}`, date: dateKey(),
         createdAt: new Date().toISOString(), status: 'draft',
         targetWordIds: list.map((w) => w.id), passage: null, questions: [], focus: '词库指定范围'
       };

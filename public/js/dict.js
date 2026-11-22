@@ -23,6 +23,8 @@ export async function dictLookup(term) {
     if (!res.ok) return null;
     const data = await res.json();
     const value = data?.ok ? data : null;
+    // 缓存有上限（与 mdx.js 同策略）：超过 60 条整体清空，防止长会话无限增长
+    if (cache.size > 60) cache.clear();
     cache.set(q, value);
     return value;
   } catch (_) {

@@ -201,7 +201,6 @@ export async function init(userId) {
         state.settings.visionModel = cfg.visionModel || state.settings.visionModel;
         state.settings.gradingModel = cfg.gradingModel || state.settings.gradingModel;
         state.settings.dailyCount = cfg.dailyQuestionCount || state.settings.dailyCount;
-        state.settings.reminderTime = cfg.reminderTime || state.settings.reminderTime;
       }
     }
   } catch (_) {}

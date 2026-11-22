@@ -88,7 +88,9 @@ function updateBadges() {
   if (badge) { badge.textContent = due > 99 ? '99+' : due; badge.classList.toggle('hide', due === 0); }
 }
 
+let routeSerial = 0;
 async function renderRoute(route) {
+  const serial = ++routeSerial;
   stopSpeaking();          // 换页面时停掉正在进行的朗读
   const old = document.getElementById('view');
   const fresh = document.createElement('main');
@@ -100,6 +102,9 @@ async function renderRoute(route) {
   fresh.innerHTML = view.render(route.params || {});
   updateStreak();
   updateBadges();
+  // 并发导航防护：mount 内部往往有 await，恢复执行时 DOM 可能已被更新的路由替换；
+  // 序号不一致说明本次已过期，直接放弃，避免把旧视图的监听器挂到新 DOM 上
+  if (serial !== routeSerial) return;
   try { await view.mount?.(route.params || {}); }
   catch (err) { console.error('[view mount]', err); }
 }

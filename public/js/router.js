@@ -14,7 +14,9 @@ function parseHash() {
 export function go(name, params = {}, replace = false) {
   const query = new URLSearchParams(params).toString();
   const hash = `#/${name}${query ? `?${query}` : ''}`;
-  if (location.hash === hash) { notify(parseHash()); return; }
+  // 目标与当前完全一致时不重复渲染：防止误点当前 tab 重建视图丢失滚动/答题状态；
+  // 需要主动重渲染请用 refresh()
+  if (location.hash === hash) return;
   if (replace) history.replaceState(null, '', hash);
   else location.hash = hash;
   notify({ name, params });

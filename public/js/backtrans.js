@@ -10,7 +10,7 @@ const IRREGULAR = {
   made: 'make', took: 'take', taken: 'take', saw: 'see', seen: 'see', said: 'say', wrote: 'write', written: 'write',
   thought: 'think', brought: 'bring', bought: 'buy', found: 'find', gave: 'give', given: 'give',
   knew: 'know', known: 'know', began: 'begin', begun: 'begin', became: 'become', came: 'come',
-  went: 'go', grew: 'grow', grown: 'grow', held: 'hold', kept: 'keep', left: 'leave', lost: 'lose',
+  grew: 'grow', grown: 'grow', held: 'hold', kept: 'keep', left: 'leave', lost: 'lose',
   met: 'meet', paid: 'pay', put: 'put', read: 'read', ran: 'run', sent: 'send', sat: 'sit', spoke: 'speak',
   spoken: 'speak', spent: 'spend', stood: 'stand', taught: 'teach', told: 'tell', understood: 'understand',
   won: 'win', wore: 'wear', worn: 'wear'

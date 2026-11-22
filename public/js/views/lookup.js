@@ -8,12 +8,13 @@ import { mdxLookup, mountMdxEntry } from '../mdx.js';
 import { refresh } from '../router.js';
 
 let query = '';
-let result = null;        // { source:'builtin'|'user'|'ai', data }
+let result = null;        // { source:'builtin'|'user'|'ai'|'none', data }
 let loading = false;
 let aiLoading = false;
 let suggestions = [];
 let inputFocusPos = null;
 let mdxEntry = null;      // 导入的 MDX 词典命中结果
+let searchSerial = 0;     // 查询序号：丢弃过期响应，防止旧查询覆盖新结果
 
 export const title = '单词速查';
 export const subtitle = `内置高考词库 ${GAOKAO_WORDS.length} 词 · 即输即查`;
@@ -54,6 +55,7 @@ export function render() {
 
 function renderResult() {
   if (loading) return `<div class="empty" style="padding:40px">${icon('searchWord', 30)}<h3>查询中…</h3></div>`;
+  if (aiLoading) return `<div class="empty" style="padding:40px">${icon('sparkles', 30)}<h3>AI 正在讲解…</h3><p>通常需要十几秒，可稍候。</p></div>`;
   if (!result) {
     if (mdxEntry) {
       return `<div class="empty" style="padding:30px">${icon('searchWord', 26)}<h3>已在上方显示 MDX 词典释义</h3><p>需要词根词缀、搭配与例句扩展，可点“AI 深度讲解”。</p><button class="btn btn-sm" data-action="deepAi">${icon('sparkles', 13)} AI 深度讲解</button></div>`;
@@ -61,6 +63,9 @@ function renderResult() {
     return `<div class="empty" style="padding:44px">${icon('bookOpen', 34)}<h3>输入单词开始查询</h3><p>例如：abandon、look forward to、significant</p></div>`;
   }
   const d = result.data;
+  if (result.source === 'none') {
+    return `<div class="empty" style="padding:30px">${icon('searchWord', 26)}<h3>「${esc(d.term)}」未能生成讲解</h3><p>可能是 AI 网关繁忙或未配置 Key，稍后可再试。</p><button class="btn btn-sm btn-primary" data-action="deepAi">${icon('sparkles', 13)} 重试 AI 讲解</button></div>`;
+  }
   if (result.source === 'ai') return renderAiResult(d);
 
   // 内置词库结构：term / phonetic / pos / meaning / example
@@ -113,11 +118,13 @@ function renderAiBlock() {
 async function doSearch(term) {
   const q = String(term || '').trim();
   if (!q) { toast('请输入单词', 'error'); return; }
+  const serial = ++searchSerial;
   query = q; result = null; suggestions = []; mdxEntry = null;
   loading = true; refresh();
 
   // 1) 导入的 MDX 词典（先查，内容最完整）
   mdxEntry = await mdxLookup(q);
+  if (serial !== searchSerial) return;   // 期间用户又查了新词，丢弃本次后续步骤
 
   const renderDone = () => { refresh(); };
 
@@ -137,17 +144,19 @@ async function doSearch(term) {
   suggestions = builtinSearch(q, 8);
   loading = false;
   if (mdxEntry) { renderDone(); return; }
-  deepAi();
+  deepAi(serial);
 }
 
-async function deepAi() {
-  if (!query) return;
+async function deepAi(serial = searchSerial) {
+  if (!query || aiLoading) return;
   aiLoading = true; refresh();
   try {
     const r = await explainWord(query);
+    if (serial !== searchSerial) return;   // 过期响应丢弃，不覆盖新查询的结果
     result = { source: 'ai', data: r };
     toast('AI 讲解已生成', 'success');
   } catch (err) {
+    if (serial !== searchSerial) return;
     toast(`AI 讲解失败：${err.message}`, 'error', 5000);
     if (!result) result = { source: 'none', data: { term: query } };
   }

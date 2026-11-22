@@ -116,8 +116,8 @@ function renderTake(quiz) {
   const questions = quiz.questions;
   const idx = Math.min(take.index, questions.length - 1);
   const q = questions[idx];
+  // 「已作答」统一口径：内容 trim 后非空才算作答（与题板 done 点、提交提示共用）
   const answered = questions.filter((x) => (take.answers[x.id] || '').trim()).length;
-  const doneCount = questions.filter((x) => take.answers[x.id] !== undefined).length;
 
   return `
     <div class="spread" style="margin-bottom:14px">
@@ -147,13 +147,13 @@ function renderTake(quiz) {
       <div class="spread mt24">
         <button class="btn" data-action="prev" ${idx === 0 ? 'disabled' : ''}>${icon('arrowLeft', 14)} 上一题</button>
         <div class="q-palette" style="justify-content:center">
-          ${questions.map((qq, i) => `<button class="q-dot ${i === idx ? 'active' : ''} ${take.answers[qq.id] !== undefined ? 'done' : ''}" data-goto="${i}">${i + 1}</button>`).join('')}
+          ${questions.map((qq, i) => `<button class="q-dot ${i === idx ? 'active' : ''} ${(take.answers[qq.id] || '').trim() ? 'done' : ''}" data-goto="${i}">${i + 1}</button>`).join('')}
         </div>
         ${idx === questions.length - 1
           ? `<button class="btn btn-primary" data-action="submit" ${take.submitting ? 'disabled' : ''}>${take.submitting ? '<span class="loading"></span> 批改中…' : `${icon('check', 14)} 提交批改`}</button>`
           : `<button class="btn btn-primary" data-action="next">下一题 ${icon('arrowRight', 14)}</button>`}
       </div>
-      <div class="tiny muted mt12" style="text-align:right">未作答 ${questions.length - doneCount} 题也可以提交，未答题计 0 分</div>
+      <div class="tiny muted mt12" style="text-align:right">未作答 ${questions.length - answered} 题也可以提交，未答题计 0 分</div>
     </section>
   `;
 }
@@ -195,17 +195,28 @@ async function generate(params) {
   if (take.generating) return;
   const state = getState();
   const count = take.count || getSettings().dailyCount || 10;
-  const focus = document.getElementById('quizFocus')?.value || take.focus || '';
+  // 「用当前列表出题」：词库页预建的草稿带着指定词范围，出题必须尊重它
+  const draft = params.mode === 'take' && params.id ? getQuiz(params.id) : null;
+  const presetIds = draft && draft.status === 'draft' && Array.isArray(draft.targetWordIds) && draft.targetWordIds.length >= 2
+    ? draft.targetWordIds
+    : null;
+  const focus = document.getElementById('quizFocus')?.value || take.focus || draft?.focus || '';
   take.focus = focus;
-  const words = pickWords(state, count);
+  let words;
+  if (presetIds) {
+    words = presetIds.map((id) => state.words.find((w) => w.id === id)).filter(Boolean);
+    words = words.slice(0, Math.max(count, 2));
+  } else {
+    words = pickWords(state, count);
+  }
   if (words.length < 2) { toast('词库不足，请先导入单词', 'error'); return; }
   take.generating = true; refresh();
   try {
     const generated = await generateQuiz({ words, count: Math.min(count, words.length), focus });
-    const existing = getQuizByDate(dateKey());
+    const existing = presetIds ? draft : getQuizByDate(dateKey());
     const quiz = {
       id: existing?.id || `q_${Date.now().toString(36)}`,
-      date: dateKey(), createdAt: new Date().toISOString(), status: 'draft',
+      date: draft?.date || dateKey(), createdAt: new Date().toISOString(), status: 'draft',
       targetWordIds: words.map((w) => w.id), focus,
       passage: generated.passage, questions: generated.questions
     };
@@ -247,7 +258,10 @@ async function submitQuiz(quiz) {
       let result;
       if (q.type === 'translation') {
         const g = gradeMap[q.id] || {};
-        const score = Number.isFinite(Number(g.score)) ? Math.max(0, Math.min(100, Number(g.score))) : (norm(response) ? 60 : 0);
+        // AI 漏给 score（null/undefined/空串）时按「有作答给 60、未作答给 0」缺省，而不是 0 分
+        const raw = Number(g.score);
+        const hasScore = g.score !== null && g.score !== undefined && g.score !== '' && Number.isFinite(raw);
+        const score = hasScore ? Math.max(0, Math.min(100, raw)) : (norm(response) ? 60 : 0);
         result = { correct: score >= 60, score, feedback: g.feedback || '已完成，建议对照参考答案复盘。', modelAnswer: g.modelAnswer || q.answer };
       } else {
         result = objective(q, response);
@@ -301,7 +315,9 @@ async function submitQuiz(quiz) {
 function renderResult(a) {
   const state = getState();
   const quiz = getQuiz(a.quizId);
-  const color = a.accuracy >= 80 ? '#3f7a56' : a.accuracy >= 60 ? '#91611b' : '#b0463b';
+  // 旧记录可能缺 accuracy（NaN 会让进度环失效），统一兜底为 0
+  const accuracy = Number.isFinite(Number(a.accuracy)) ? Number(a.accuracy) : 0;
+  const color = accuracy >= 80 ? '#3f7a56' : accuracy >= 60 ? '#91611b' : '#b0463b';
   const circ = 2 * Math.PI * 46;
   return `
     <div class="spread" style="margin-bottom:14px">
@@ -313,8 +329,8 @@ function renderResult(a) {
         <svg class="score-ring" viewBox="0 0 110 110">
           <circle cx="55" cy="55" r="46" fill="none" stroke="#efece3" stroke-width="10" />
           <circle cx="55" cy="55" r="46" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"
-            stroke-dasharray="${circ}" stroke-dashoffset="${circ * (1 - a.accuracy / 100)}" transform="rotate(-90 55 55)" />
-          <text x="55" y="61" text-anchor="middle" font-size="26" font-weight="800" fill="${color}">${a.accuracy}%</text>
+            stroke-dasharray="${circ}" stroke-dashoffset="${circ * (1 - accuracy / 100)}" transform="rotate(-90 55 55)" />
+          <text x="55" y="61" text-anchor="middle" font-size="26" font-weight="800" fill="${color}">${accuracy}%</text>
         </svg>
         <div class="score-num" style="font-size:20px;color:${color}">${Math.round(a.score)} 分</div>
         <div class="small muted mt8">${a.correctCount} / ${a.total} 题正确 · 用时 ${durationText(a.durationMs || 0)} · AI 批改 ${a.aiGraded} 题</div>
@@ -389,7 +405,7 @@ export function mount() {
     if (a === 'again') {
       take.quizId = null; take.answers = {}; take.index = 0; take.count = null;
       const existing = getQuizByDate(dateKey());
-      if (existing) { existing.status = 'draft'; }
+      if (existing) { existing.status = 'draft'; saveQuiz(existing); }  // 显式落盘，立即关页也不丢
       go('quiz', { mode: 'take' }); return;
     }
     if (a === 'exportAttempt') {
