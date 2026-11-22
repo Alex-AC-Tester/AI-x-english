@@ -40,7 +40,8 @@ if not exist "logs" mkdir "logs" >nul 2>nul
 
 rem ---------- 是否已在运行 ----------
 set "ALIVE="
-curl -s -m 2 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
+rem -f：只有 HTTP 2xx 才算存活，端口上跑着别的返回错误的服务时不会被误判
+curl -sf -m 2 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
 if not errorlevel 1 set "ALIVE=1"
 if not defined ALIVE (
   netstat -ano -p tcp 2>nul | findstr ":!PORT! " | findstr LISTENING >nul
@@ -82,10 +83,7 @@ if not errorlevel 1 (
   python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('spacy') else 1)" >nul 2>nul
   if not errorlevel 1 set "PY_BIN=python"
 )
-if not defined PY_BIN if exist "%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe" (
-  "%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe" -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('spacy') else 1)" >nul 2>nul
-  if not errorlevel 1 set "PY_BIN=%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe"
-)
+rem 注意：不探测任何机器专属 Python 路径；spaCy 仅支持 3.10-3.12，请用 nlp\setup-venv.bat 建项目 .venv
 if defined PY_BIN (
   set "PYTHON_BIN=!PY_BIN!"
   echo  [环境] 已启用本地 spaCy 句法分析
@@ -116,7 +114,7 @@ start "WordWise 后端" /min cmd /c "node server.js > logs\server.out.log 2>&1"
 set "READY="
 for /l %%i in (1,1,25) do (
   if not defined READY (
-    curl -s -m 1 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
+    curl -sf -m 1 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
     if not errorlevel 1 (
       set "READY=1"
     ) else (
@@ -126,9 +124,10 @@ for /l %%i in (1,1,25) do (
 )
 
 rem 记录 PID，供 backend-stop.bat 精确停止
+rem 注意：PID 全数字紧贴 ">" 会被 cmd 当成句柄重定向，必须把重定向写在 echo 前面
 if defined READY (
   for /f "tokens=5" %%p in ('netstat -ano -p tcp ^| findstr ":!PORT! " ^| findstr LISTENING') do (
-    echo %%p> "logs\server.pid"
+    >"logs\server.pid" echo %%p
   )
 )
 
@@ -137,10 +136,10 @@ if defined READY (
   echo  [完成] 后端已在后台运行。
   call :urls
   echo.
-  echo  日志：logs\server.out.log      错误：logs\server.err.log
+  echo  日志：logs\server.out.log（含错误输出）
   echo  停止：backend-stop.bat          前台运行：backend-start.bat --fg
 ) else (
-  echo  [警告] 端口迟迟没有响应，请查看 logs\server.err.log
+  echo  [警告] 端口迟迟没有响应，请查看 logs\server.out.log
   echo  也可以改用前台模式看具体报错：backend-start.bat --fg
 )
 echo.

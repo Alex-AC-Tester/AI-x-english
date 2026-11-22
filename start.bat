@@ -37,7 +37,8 @@ if /i "%~1"=="--restart" (
 
 where curl >nul 2>nul
 if not errorlevel 1 (
-  curl -s -m 2 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
+  rem -f：只有 HTTP 2xx 才算存活，避免把端口上返回错误的其他服务误判为本应用
+  curl -sf -m 2 "http://127.0.0.1:!PORT!/api/health" >nul 2>nul
   if not errorlevel 1 (
     echo  [提示] 服务已经在运行，直接为你打开浏览器。
     if not "%NO_BROWSER%"=="1" start "" "http://localhost:!PORT!/#/home"
@@ -72,10 +73,7 @@ if not errorlevel 1 (
   python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('spacy') else 1)" >nul 2>nul
   if not errorlevel 1 set "PY_BIN=python"
 )
-if not defined PY_BIN if exist "%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe" (
-  "%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe" -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('spacy') else 1)" >nul 2>nul
-  if not errorlevel 1 set "PY_BIN=%USERPROFILE%\.workbuddy\binaries\python\versions\3.13.12\python.exe"
-)
+rem 注意：不探测任何机器专属 Python 路径；spaCy 仅支持 3.10-3.12，请用 nlp\setup-venv.bat 建项目 .venv
 if defined PY_BIN (
   set "PYTHON_BIN=!PY_BIN!"
   echo  [环境] 已启用本地 spaCy 句法分析
@@ -83,7 +81,7 @@ if defined PY_BIN (
   echo  [提示] 未找到可用的 spaCy，句法分析会自动降级（不影响使用）
 )
 
-if not "%NO_BROWSER%"=="1" start "" /min cmd /c "tools\open-browser.bat http://localhost:!PORT!/#/home"
+if not "%NO_BROWSER%"=="1" start "" /min cmd /c "tools\open-browser.bat http://localhost:!PORT!/#/home !PORT!"
 
 echo.
 echo  正在启动，浏览器即将自动打开...

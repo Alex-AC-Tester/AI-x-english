@@ -82,7 +82,6 @@ function renderResult() {
       <div class="def-item"><span class="small">${esc(d.meaning || '暂无释义')}</span></div>
       ${d.example ? `<div class="def-item"><span class="def-pos">例句</span><div style="font-family:Georgia,serif">${esc(d.example)}<button class="tts-btn tts-inline" type="button" data-speak="${esc(d.example)}" title="听例句" aria-label="听例句">${icon('volume', 12)}</button></div></div>` : ''}
     </div>
-    ${renderAiBlock()}
   `;
 }
 
@@ -106,11 +105,6 @@ function renderAiResult(d) {
       ${d.usage ? `<div class="feedback mt8">${esc(d.usage)}</div>` : ''}
     </div>
   `;
-}
-
-function renderAiBlock() {
-  // 已在 AI 结果中呈现，这里仅占位
-  return '';
 }
 
 /* ---------- 查询逻辑 ---------- */

@@ -1,4 +1,4 @@
-import { getSettings, setSettings, getState, replaceAll, flush } from '../store.js';
+import { getSettings, setSettings, getState, replaceAll } from '../store.js';
 import { listModels, testConnection } from '../ai.js';
 import { requestPermission, subscribePush, unsubscribePush, syncPushSettings, testPush, showNotification, getPermissionStatus, openNotificationSettings } from '../reminder.js';
 import { icon, esc, toast, modal, confirmDialog, pickFile, pickFiles, readAsDataURL, download } from '../ui.js';

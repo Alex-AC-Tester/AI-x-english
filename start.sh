@@ -38,7 +38,7 @@ print_urls() {
   fi
 }
 
-if command -v curl >/dev/null 2>&1 && curl -s -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
+if command -v curl >/dev/null 2>&1 && curl -sf -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
   echo "[提示] 服务已在运行，直接为你打开浏览器。"
   [ "${NO_BROWSER:-0}" = "1" ] || open_url "http://localhost:$PORT/#/home"
   print_urls
@@ -66,7 +66,16 @@ else
   echo "[提示] 未检测到 Python，句法分析会自动降级（不影响使用）。"
 fi
 
-[ "${NO_BROWSER:-0}" = "1" ] || ( sleep 3; open_url "http://localhost:$PORT/#/home" ) >/dev/null 2>&1 &
+# 轮询 /api/health 就绪后再开浏览器（消除固定 3 秒延时的竞态）；最多等约 30 秒
+[ "${NO_BROWSER:-0}" = "1" ] || (
+  for i in $(seq 1 30); do
+    if command -v curl >/dev/null 2>&1; then
+      curl -sf -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && { open_url "http://localhost:$PORT/#/home"; exit 0; }
+    fi
+    sleep 1
+  done
+  open_url "http://localhost:$PORT/#/home"
+) >/dev/null 2>&1 &
 
 echo "正在启动，浏览器即将自动打开..."
 print_urls

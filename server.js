@@ -158,25 +158,6 @@ function emptyStore() {
   return { version: 1, words: [], quizzes: [], attempts: [], activity: [], settings: {}, updatedAt: null };
 }
 
-function loadStore() {
-  const s = readJson(STORE_FILE, null);
-  if (!s || typeof s !== 'object') return emptyStore();
-  return Object.assign(emptyStore(), s);
-}
-
-function saveStore(store) {
-  if (fs.existsSync(STORE_FILE)) {
-    try {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      fs.copyFileSync(STORE_FILE, path.join(BACKUP_DIR, `store-${stamp}.json`));
-      const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith('store-')).sort();
-      while (files.length > 20) fs.unlinkSync(path.join(BACKUP_DIR, files.shift()));
-    } catch (_) { /* 备份失败不阻断写入 */ }
-  }
-  store.updatedAt = new Date().toISOString();
-  writeJsonAtomic(STORE_FILE, store);
-}
-
 /* ---------------- 每用户学习数据 ---------------- */
 
 function userStoreFile(userId) {
@@ -614,10 +595,9 @@ const server = http.createServer(async (req, res) => {
       res.end(hit.text ? Buffer.from(hit.body, 'utf8') : hit.buf);
       return;
     }
-    if (req.method === 'GET' && p === '/api/mdx/res/') { send(res, 404, 'Not found'); return; }
-
 
     // 本地 NLP 句法分析（自动拉起 Python 服务，失败则降级）
+
     if (req.method === 'GET' && p === '/api/nlp/status') {
       const ok = await nlp.checkHealth(true);
       send(res, 200, { ok, available: ok });
