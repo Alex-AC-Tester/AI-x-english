@@ -604,21 +604,28 @@ function openCoach(index, sentenceOverride = '') {
     ? all.slice(Math.max(0, index - 1), index + 2).join(' ')
     : all.slice(0, 3).join(' ');
 
+  // 恢复上次的对话轮次（上限 10 轮）：切页/刷新后仍可回顾，不再丢失中间过程
+  const cachedEntry = index >= 0 ? (a.sentences?.[index] || null) : null;
   coach = {
     index,
     sentence,
     context,
-    // 恢复上次的对话轮次（上限 10 轮）：切页/刷新后仍可回顾，不再丢失中间过程
-    turns: index >= 0 ? [...(a.sentences?.[index]?.coachTurns || [])] : [],
+    turns: index >= 0 ? [...(cachedEntry?.coachTurns || [])] : [],
     attempts: 0,
     busy: false,
     analysis: null,
-    cached: index >= 0 ? (a.sentences?.[index] || null) : null,
+    cached: cachedEntry,
     fromCache: false,
     nlp: null,
     draft: '',
     error: ''
   };
+  // 上次已经拿到完整讲解 → 直接恢复到分析视图（对话历史一并回顾）；
+  // 想重练用「再练一次这句」。只有轮次没有讲解（上次中途退出）→ 保持对话态继续练。
+  if (cachedEntry && String(cachedEntry.translation || '').trim()) {
+    coach.analysis = cachedEntry;
+    coach.fromCache = true;
+  }
   activeIndex = index;
   activeNlp = (index >= 0 && a.sentences?.[index]?.nlp) || null;
   refreshKeep();
