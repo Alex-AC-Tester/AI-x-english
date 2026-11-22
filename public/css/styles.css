@@ -1978,3 +1978,31 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--primary); }
   outline: 2px solid #d69e2e; outline-offset: 2px; border-radius: 3px;
   transition: background .7s ease;
 }
+
+/* ============ 移动端适配 ============ */
+/* 触屏设备：按钮放大到舒适触摸目标（≥40px），输入框 16px 防 iOS 聚焦自动缩放 */
+@media (hover: none) and (pointer: coarse) {
+  .btn { min-height: 42px; padding: 0 16px; font-size: 14px; }
+  .btn-sm { min-height: 38px; padding: 0 14px; }
+  .input, .select, .textarea { font-size: 16px; padding: 10px 12px; }
+  .kw-chip, .option { min-height: 44px; }
+  .tab-item { padding: 6px 0 3px; }
+  .tab-item svg { width: 21px; height: 21px; }
+  .tts-btn { width: 34px; height: 34px; }
+  .hard-item { min-height: 48px; }
+}
+/* 底部 tabbar：触摸目标 ≥48px（iPhone 安全区已由 env() 处理） */
+@media (max-width: 900px) {
+  .tab-item { min-height: 48px; }
+}
+/* 阅读器列表：移动端拍照入口置前并用主色强调 */
+.quick-photo-row { display: inline-flex; gap: 8px; align-items: center; }
+.quick-photo { border-color: var(--primary); color: var(--primary); }
+@media (max-width: 720px) {
+  .quick-photo-row { display: flex; width: 100%; margin-top: 10px; }
+  .quick-photo-row .btn { flex: 1; }
+  .quick-photo-row .quick-photo { order: -1; background: var(--primary); color: #fff; }
+}
+@media (max-width: 720px) {
+  .card-head { flex-wrap: wrap; }
+}

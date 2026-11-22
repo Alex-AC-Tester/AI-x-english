@@ -121,7 +121,10 @@ function renderList() {
     <section class="card">
       <div class="card-head">
         <div><h2>我的文章 <span class="pill">${articles.length}</span></h2><div class="sub">每篇文章都可精读、讲解、提取重点词</div></div>
-        <button class="btn btn-primary btn-sm" data-action="newImport">${icon('plus', 14)} 导入文章</button>
+        <div class="quick-photo-row">
+          <button class="btn btn-sm quick-photo" data-action="quickPhotoArticle" ${busy ? 'disabled' : ''} title="拍照或选一张文章照片，识别后预览保存">${icon('camera', 14)} 拍照</button>
+          <button class="btn btn-primary btn-sm" data-action="newImport">${icon('plus', 14)} 导入文章</button>
+        </div>
       </div>
       ${articles.length ? `<div class="grid grid-2">${articles.map((a) => articleCard(a)).join('')}</div>`
         : `<div class="empty">${icon('reader', 34)}<h3>还没有文章</h3><p>粘贴一段英文、上传 TXT 或拍一张文章照片开始精读</p>
@@ -204,6 +207,10 @@ function renderImportPanel() {
                     <button class="photo-add" data-action="pickArticlePhoto" type="button">${icon('plus', 20)}<span class="tiny">添加</span></button>
                    </div>`
                 : `${icon('camera', 28)}<div class="mt8">点击选择文章照片（可多选）</div><div class="tiny mt8">支持课本、试卷、阅读材料 · 按页顺序识别</div>`}
+            </div>
+            <div class="row mt8" style="gap:8px">
+              <button class="btn btn-sm" data-action="pickArticleCamera" type="button">${icon('camera', 13)} 拍照</button>
+              <button class="btn btn-sm" data-action="pickArticlePhoto" type="button">${icon('image', 13)} 从相册选择</button>
             </div>
             ${importDraft.photos.length ? `<div class="tiny muted mt8">已选 ${importDraft.photos.length} 张图片，将按选择顺序拼接正文</div>` : ''}
           </div>
@@ -820,6 +827,38 @@ export function mount() {
     const a = btn.dataset.action;
 
     if (a === 'newImport') { collectImport(); showImport = true; refreshMe(); return; }
+    if (a === 'quickPhotoArticle') {
+      // 拍照快捷流：直接调起相机/选图 → OCR → 打开导入面板预览（已自动填好）→ 检查后保存
+      // 比原流程少 2-3 步；多张照片/电子书仍走「导入文章」完整面板
+      if (busy) return;
+      collectImport();
+      busy = true; refreshMe();
+      try {
+        const dataUrl = await pickFile('image/*', true);
+        if (!dataUrl) { busy = false; refreshMe(); return; }
+        toast('正在识别照片正文…', 'info');
+        const r = await ocrArticle(dataUrl, '');
+        if (!r.text) throw new Error('没有识别到正文，请换一张更清晰的照片，或用「导入文章」多拍几张');
+        importDraft.title = importDraft.title || r.title || '';
+        importDraft.text = r.text;
+        importDraft.source = r.source || { type: 'camera' };
+        showImport = true;
+        toast(`识别完成：${countWordsEn(r.text)} 词，检查无误后点保存`, 'success');
+      } catch (err) { toast(`拍照识别失败：${err.message}`, 'error', 5000); }
+      busy = false; refreshMe();
+      return;
+    }
+    if (a === 'pickArticleCamera') {
+      // 移动端直达相机的单张入口（capture 属性调起系统相机）
+      collectImport();
+      const dataUrl = await pickFile('image/*', true);
+      if (!dataUrl) return;
+      toast('正在压缩图片…', 'info');
+      try { importDraft.photos.push({ dataUrl: await compressImage(dataUrl), name: `camera-${Date.now()}.jpg` }); }
+      catch (_) { importDraft.photos.push({ dataUrl, name: `camera-${Date.now()}.jpg` }); }
+      refreshMe();
+      return;
+    }
     if (a === 'goHistory') { go('history'); return; }
     if (a === 'hardItem') { openCoach(Number(btn.dataset.i)); return; }
     if (a === 'jumpSentence') { jumpToSentence(Number(btn.dataset.si)); return; }
