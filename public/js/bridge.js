@@ -1,5 +1,6 @@
 // 原生桥接层：在 APK 内自动切换到原生 HTTP / 文件 / 通知能力，浏览器下回退到 Web 实现。
-// 内置默认网关配置：默认不带 Key，Key 请在「设置」里填写，或写入本地 config.json / 环境变量 WORDWISE_API_KEY
+// BUILTIN_CONFIG 仅在 APK 内 apiMode='builtin' 时使用（浏览器路径不走这里）；
+// 正常用法是在「设置」里选 custom 并填写自己的网关与 Key。改这里等于改 APK 内置预设。
 export const BUILTIN_CONFIG = {
   apiBase: 'https://developer.amd.com.cn/radeon/api/v1',
   apiKey: ''

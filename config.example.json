@@ -1,11 +1,11 @@
 {
   "port": 8787,
   "host": "0.0.0.0",
-  "apiBase": "https://developer.amd.com.cn/radeon/api/v1",
+  "apiBase": "",
   "apiKey": "",
-  "textModel": "DeepSeek-V4.1-Flash",
-  "visionModel": "MiniCPM-V-4.7-1B",
-  "gradingModel": "DeepSeek-V4.1-Flash",
+  "textModel": "",
+  "visionModel": "",
+  "gradingModel": "",
   "dailyQuestionCount": 10,
   "reminderTime": "20:00"
 }

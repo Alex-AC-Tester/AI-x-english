@@ -19,6 +19,7 @@ const nlp = require('./nlp-client');
 const dict = require('./dict');
 const mdx = require('./mdx');
 const auth = require('./auth');
+const modelconfig = require('./modelconfig');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -77,17 +78,37 @@ function writeJsonAtomic(file, value) {
 }
 
 let config = readJson(CONFIG_FILE, {});
+// 代码零默认网关 / 零默认模型名：用户必须在 config.json、环境变量或设置页里自己配置
 const DEFAULT_CONFIG = {
   port: 8787,
-  apiBase: 'https://developer.amd.com.cn/radeon/api/v1',
+  apiBase: '',
   apiKey: '',
-  textModel: 'DeepSeek-V4.1-Flash',
-  visionModel: 'MiniCPM-V-4.7-1B',
-  gradingModel: 'DeepSeek-V4.1-Flash',
+  textModel: '',
+  visionModel: '',
+  gradingModel: '',
   dailyQuestionCount: 10,
   reminderTime: '20:00'
 };
 config = Object.assign({}, DEFAULT_CONFIG, config);
+
+/** POST /api/config 白名单字段的类型与格式校验；返回错误文案或 null */
+function validateConfigPatch(body) {
+  for (const k of ['apiBase', 'apiKey', 'textModel', 'visionModel', 'gradingModel']) {
+    if (body[k] === undefined) continue;
+    const v = String(body[k] == null ? '' : body[k]).trim();
+    if (v.length > 500) return `${k} 过长（上限 500 字符）`;
+    if (k === 'apiBase' && v && !/^https?:\/\//i.test(v)) return 'apiBase 必须是 http(s):// 开头的地址';
+    if (k !== 'apiBase' && /[\r\n]/.test(v)) return `${k} 不能包含换行`;
+  }
+  if (body.dailyQuestionCount !== undefined) {
+    const n = Number(body.dailyQuestionCount);
+    if (!Number.isInteger(n) || n < 1 || n > 100) return 'dailyQuestionCount 需为 1-100 的整数';
+  }
+  if (body.reminderTime !== undefined && String(body.reminderTime).trim() !== '') {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(body.reminderTime).trim())) return 'reminderTime 需为 HH:MM（24 小时制）';
+  }
+  return null;
+}
 
 // 监听参数：默认 0.0.0.0，局域网内其它设备可直接访问
 const PORT = Number(process.env.PORT || config.port || 8787);
@@ -275,39 +296,33 @@ async function callUpstream(apiBase, apiKey, body, timeoutMs = 120000) {
 
 async function handleAI(req, res) {
   const body = await readJsonBody(req);
-  const clientKey = String(req.headers['x-api-key'] || '').trim();
-  const apiKey = clientKey || String(process.env.WORDWISE_API_KEY || config.apiKey || '').trim();
-  // 只有客户端自带 Key 时才允许自定义网关；使用服务端 Key 时忽略 x-api-base，
-  // 防止把服务端保存的 Key 发往任意地址（Key 外泄 / SSRF）
-  const apiBase = clientKey
-    ? String(req.headers['x-api-base'] || config.apiBase || '')
-    : String(config.apiBase || '');
-  if (!apiKey) { send(res, 400, { error: '未配置 API Key，请在设置中填写' }); return; }
+  const gw = modelconfig.resolveGateway(req, config);
+  if (!gw.key) { send(res, 400, { error: '未配置 API Key，请在设置中填写' }); return; }
+  if (!gw.base) { send(res, 400, { error: '未配置 AI 网关地址（config.json 的 apiBase 或设置页）' }); return; }
   if (!body.messages || !Array.isArray(body.messages)) { send(res, 400, { error: 'messages 格式不正确' }); return; }
   const payload = {
-    model: body.model || config.textModel,
+    model: modelconfig.resolveModel(body.model, config, 'WORDWISE_TEXT_MODEL', 'textModel'),
     messages: body.messages,
     temperature: typeof body.temperature === 'number' ? body.temperature : 0.2,
     max_tokens: body.max_tokens || 2048
   };
+  // 推理力度：部分兼容网关支持，原样透传（不做枚举校验，交由上游判定）
+  if (body.reasoning_effort) payload.reasoning_effort = String(body.reasoning_effort);
   if (body.response_format && body.response_format.type) payload.response_format = body.response_format;
-  const result = await callUpstream(apiBase, apiKey, payload);
+  const result = await callUpstream(gw.base, gw.key, payload);
   send(res, result.ok ? 200 : result.status || 502, result.ok ? result.data : { error: result.error });
 }
 
 async function handleModels(req, res) {
-  const clientKey = String(req.headers['x-api-key'] || '').trim();
-  const apiKey = clientKey || String(process.env.WORDWISE_API_KEY || config.apiKey || '').trim();
-  // 同 handleAI：服务端 Key 生效时不采纳客户端 x-api-base
-  const apiBase = clientKey
-    ? String(req.headers['x-api-base'] || config.apiBase || '')
-    : String(config.apiBase || '');
-  if (Date.now() - modelsCache.at < 10 * 60 * 1000 && modelsCache.data && !req.headers['x-api-key']) {
+  const gw = modelconfig.resolveGateway(req, config);
+  if (!gw.key) { send(res, 400, { error: '未配置 API Key，请在设置中填写' }); return; }
+  if (!gw.base) { send(res, 400, { error: '未配置 AI 网关地址（config.json 的 apiBase 或设置页）' }); return; }
+  if (Date.now() - modelsCache.at < 10 * 60 * 1000 && modelsCache.data && !gw.clientKey) {
     send(res, 200, modelsCache.data); return;
   }
   try {
-    const r = await fetch(`${String(apiBase).replace(/\/$/, '')}/models`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }, signal: AbortSignal.timeout(20000)
+    const r = await fetch(`${String(gw.base).replace(/\/$/, '')}/models`, {
+      headers: { 'Authorization': `Bearer ${gw.key}` }, signal: AbortSignal.timeout(20000)
     });
     const data = await r.json();
     if (r.ok) modelsCache = { at: Date.now(), data };
@@ -640,8 +655,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/api/config') {
       if (!currentUser) { unauthorized(res); return; }
       const body = await readJsonBody(req);
+      const invalid = validateConfigPatch(body);
+      if (invalid) { send(res, 400, { ok: false, error: invalid }); return; }
       const allowed = ['apiBase', 'apiKey', 'textModel', 'visionModel', 'gradingModel', 'dailyQuestionCount', 'reminderTime'];
-      allowed.forEach((k) => { if (body[k] !== undefined) config[k] = body[k]; });
+      allowed.forEach((k) => {
+        if (body[k] === undefined) return;
+        config[k] = typeof body[k] === 'number' ? body[k] : String(body[k] == null ? '' : body[k]).trim();
+      });
       writeJsonAtomic(CONFIG_FILE, config);
       modelsCache = { at: 0, data: null };
       send(res, 200, { ok: true });
