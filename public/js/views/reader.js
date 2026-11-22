@@ -1,6 +1,6 @@
 // 文章阅读器：导入文章 → 分句精读 → 选中句子 AI 讲解 → 重点词加入词库
 
-import { getState, getArticle, saveArticle, patchArticle, deleteArticle, cacheSentence, addWords, logActivity, recordSentence } from '../store.js';
+import { getState, getArticle, saveArticle, patchArticle, deleteArticle, cacheSentence, patchSentence, addWords, logActivity, recordSentence } from '../store.js';
 import { ocrArticle, ocrArticleMulti, analyzeArticle, coachSentence, translateSelection, explainWord, compressImage } from '../ai.js';
 import { builtinLookup } from '../gaokao.js';
 import { icon, esc, toast, modal, confirmDialog, pickFile, pickFiles, readAsDataURL, dateKey } from '../ui.js';
@@ -585,6 +585,14 @@ function jumpToSentence(si) {
   setTimeout(() => el.classList.remove('anchor-flash'), 2200);
 }
 
+/** 把精读对话轮次持久化到句子缓存（上限 10 轮），切页/刷新后可回顾 */
+function persistCoachTurns(c) {
+  if (!c || c.index < 0) return;
+  const a = getArticle(currentId);
+  if (!a) return;
+  patchSentence(a.id, c.index, { coachTurns: c.turns.slice(-10) });
+}
+
 /** 打开某一句的精读对话：先让学生自己翻，AI 只引导 */
 function openCoach(index, sentenceOverride = '') {
   const a = getArticle(currentId);
@@ -600,7 +608,8 @@ function openCoach(index, sentenceOverride = '') {
     index,
     sentence,
     context,
-    turns: [],
+    // 恢复上次的对话轮次（上限 10 轮）：切页/刷新后仍可回顾，不再丢失中间过程
+    turns: index >= 0 ? [...(a.sentences?.[index]?.coachTurns || [])] : [],
     attempts: 0,
     busy: false,
     analysis: null,
@@ -648,6 +657,7 @@ async function startCoach() {
     c.error = `AI 暂时没回话：${err.message}`;
     c.turns.push({ role: 'coach', text: '先别看答案，试着用中文把这句话的意思写出来，能写多少写多少，写完发给我。' });
   }
+  persistCoachTurns(c);
   refreshKeep();
 }
 
@@ -687,6 +697,7 @@ async function runCoachTurn({ translation = '', mode = 'answer' } = {}) {
     c.busy = false;
     c.error = `对话失败：${err.message}`;
   }
+  persistCoachTurns(c);
   refreshKeep();
   scrollCoachIntoView();
 }
@@ -701,7 +712,11 @@ function finishCoach(analysis) {
   c.fromCache = false;
   const mine = lastMyTurn(c);
   if (a) {
-    if (c.index >= 0) cacheSentence(a.id, c.index, analysis);
+    if (c.index >= 0) {
+      cacheSentence(a.id, c.index, analysis);
+      // cacheSentence 会整体覆盖句子缓存对象，轮次要在其之后补写回去
+      persistCoachTurns(c);
+    }
     recordSentence(Object.assign(buildHistoryEntry(analysis, a, c.index), {
       myTranslation: mine?.text || '',
       attempts: c.attempts || 1
@@ -1009,12 +1024,18 @@ export function mount() {
 
     if (a === 'articleAnalysis') {
       const art = getArticle(currentId);
+      // 全文分析缓存守卫：正文没变就直接用已有结果（与长难句的 hardHash 同思路）
+      const hash = articleHash(art.text);
+      if (art.analysis && art.analysisHash === hash) {
+        toast('正文未变化，已直接使用缓存的分析结果；修改正文后可重新分析', 'info');
+        return;
+      }
       analysisBusy = true; refreshMe();
       try {
         // 把阅读器分句传给 AI 分析：AI 返回的重点词/长难句会逐条定位回原文（anchor）
         const sentences = flattenSentences(splitArticle(art.text)).map((text, index) => ({ index, text }));
         const an = await analyzeArticle(art.title, art.text, sentences);
-        patchArticle(art.id, { analysis: an });
+        patchArticle(art.id, { analysis: an, analysisHash: hash });
         const stats = an.hardSentences.filter((x) => x.anchor?.anchored).length;
         toast(`全文分析已生成 · 难句定位 ${stats}/${an.hardSentences.length}`, 'success');
       } catch (err) { toast(`分析失败：${err.message}`, 'error', 5000); }

@@ -5,7 +5,7 @@ import { parseLooseJSON } from './ui.js';
 import { isNative, apiCredentials, nativeAIRequest } from './bridge.js';
 import { nlpSentence, nlpArticle, syntaxHint } from './nlp.js';
 import { profilePrompt } from './profile.js';
-import { anchorItems } from './anchor.js';
+import { anchorItems, normalizeKey } from './anchor.js';
 import { crossCheckAnalysis } from './nlpcross.js';
 
 /** 取当前学习画像摘要；取不到时返回空串，不影响调用 */
@@ -79,6 +79,20 @@ export async function chat(messages, options = {}) {
     }
   }
   throw lastError;
+}
+
+/**
+ * 请求并解析严格 JSON；解析失败时把问题反馈给模型重试一次（自愈）。
+ * 原先 malformed JSON 会直接导致整个功能失败，现在只有两次都失败才抛错。
+ */
+export async function chatJson(messages, options = {}) {
+  const first = await chat(messages, options);
+  try { return parseLooseJSON(first); } catch (_) { /* 进入重试 */ }
+  const retry = await chat([
+    ...messages,
+    { role: 'user', content: '你上一次的输出无法解析为 JSON。请重新输出：只输出一个合法的 JSON 对象，不要 Markdown 代码块、不要解释、不要任何前后缀文字。' }
+  ], options);
+  return parseLooseJSON(retry);
 }
 
 const TEXT_FALLBACKS = ['Qwen3.8-27B', 'GLM-5.3-Flash', 'MiMo-V2.6-Flash', 'MiniCPM5-2B'];
@@ -159,7 +173,7 @@ const OCR_SYSTEM = `你是英语学习资料的结构化识别助手。用户会
 
 export async function ocrImage(dataUrl, hint = '') {
   const s = getSettings();
-  const text = await chat([
+  const parsed = await chatJson([
     { role: 'system', content: OCR_SYSTEM },
     {
       role: 'user',
@@ -169,17 +183,15 @@ export async function ocrImage(dataUrl, hint = '') {
       ]
     }
   ], { model: s.visionModel, fallbacks: VISION_FALLBACKS, json: true, max_tokens: 4000, temperature: 0.05, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   const items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.words || []);
   return items.filter((x) => x && String(x.term || '').trim()).slice(0, 60);
 }
 
 export async function ocrText(rawText) {
-  const text = await chat([
+  const parsed = await chatJson([
     { role: 'system', content: OCR_SYSTEM },
     { role: 'user', content: `请从以下文本中提取词条：\n\n${rawText.slice(0, 12000)}` }
   ], { fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 4000, temperature: 0.05, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   const items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.words || []);
   return items.filter((x) => x && String(x.term || '').trim()).slice(0, 60);
 }
@@ -229,14 +241,13 @@ export async function generateQuiz({ words, count = 10, focus = '' }) {
     example: (w.example || '').slice(0, 160)
   }));
   if (!brief.length) throw new Error('词库为空，请先导入单词');
-  const text = await chat([
+  const parsed = await chatJson([
     { role: 'system', content: QUIZ_SYSTEM },
     {
       role: 'user',
       content: `请生成 ${count} 道题的今日试卷。\n${focus ? `侧重点：${focus}\n` : ''}词表（JSON）：\n${JSON.stringify(brief)}`
     }
   ], { model: s.textModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 6000, temperature: 0.45, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   if (!parsed || !Array.isArray(parsed.questions)) throw new Error('AI 未返回有效试卷，请重试');
   return {
     passage: parsed.passage || { title: '', text: '', translation: '' },
@@ -267,11 +278,10 @@ const GRADE_SYSTEM = `你是严谨而宽松的英语老师。批改学生对单�
 export async function gradeSubjective(items) {
   if (!items.length) return {};
   const s = getSettings();
-  const text = await chat([
+  const parsed = await chatJson([
     { role: 'system', content: GRADE_SYSTEM },
     { role: 'user', content: `待批改作答（JSON）：\n${JSON.stringify(items)}` }
   ], { model: s.gradingModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 3000, temperature: 0.1, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   const list = Array.isArray(parsed) ? parsed : (parsed.results || []);
   const map = {};
   list.forEach((r) => { if (r && r.id) map[String(r.id)] = r; });
@@ -304,7 +314,7 @@ export async function generateReport(stats) {
 /** 从文章照片 OCR 出完整英文文本（保留段落），而非词条 */
 export async function ocrArticle(dataUrl, hint = '') {
   const s = getSettings();
-  const text = await chat([
+  const parsed = await chatJson([
     {
       role: 'system',
       content: `你是英文文章 OCR 助手。从照片中完整转录英文文章正文，输出严格 JSON：
@@ -326,7 +336,6 @@ export async function ocrArticle(dataUrl, hint = '') {
       ]
     }
   ], { model: s.visionModel, fallbacks: VISION_FALLBACKS, json: true, max_tokens: 5000, temperature: 0.05, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   return {
     title: String(parsed.title || '').trim(),
     text: String(parsed.text || '').trim(),
@@ -359,11 +368,10 @@ ${hint ? `补充：${hint}` : ''}` },
     ...images.map((url, i) => ({ type: 'text', text: `【第 ${i + 1} 张图片】` })),
     ...images.map((url) => ({ type: 'image_url', image_url: { url } }))
   ];
-  const text = await chat([
+  const parsed = await chatJson([
     { role: 'system', content: '你是英文文章 OCR 助手，按图片顺序转录正文，输出严格 JSON。' },
     { role: 'user', content }
   ], { model: s.visionModel, fallbacks: VISION_FALLBACKS, json: true, max_tokens: 8000, temperature: 0.05, reasoningEffort: 'low' });
-  const parsed = parseLooseJSON(text);
   const pages = Array.isArray(parsed.pages)
     ? parsed.pages.map((p) => String(p.text || '').trim()).filter(Boolean) : [];
   const merged = String(parsed.text || '').trim() || pages.join('\n\n');
@@ -388,7 +396,7 @@ export async function analyzeArticle(title, text, sentences = null) {
   // 先做全文句法概览，作为 LLM 分析的参考骨架
   const nlpResult = await nlpArticle(text, 80);
   const hint = nlpResult ? syntaxHint(nlpResult) : '';
-  const out = await chat([
+  const p = await chatJson([
     {
       role: 'system',
       content: `你是资深英语阅读教师。针对给定英文文章做深度阅读分析，输出严格 JSON：
@@ -412,7 +420,6 @@ ${hint}`
     },
     { role: 'user', content: `标题：${title || '(无标题)'}\n\n正文：\n${String(text).slice(0, 15000)}` }
   ], { model: s.textModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 6000, temperature: 0.35, reasoningEffort: 'low' });
-  const p = parseLooseJSON(out);
   const sents = Array.isArray(sentences) && sentences.length ? sentences : null;
   return {
     summary: String(p.summary || ''), theme: String(p.theme || ''),
@@ -570,61 +577,6 @@ export async function coachSentence({ sentence, context = '', transcript = [], t
   };
 }
 
-/** 单句讲解：翻译 + 结构拆解 + 语法点 + 重点词（可直接入库） */
-export async function explainSentence(sentence, context = '') {
-  const s = getSettings();
-  // 先做确定性句法分析，作为给 LLM 的参考骨架（失败则降级）
-  const nlpResult = await nlpSentence(sentence);
-  const hint = syntaxHint(nlpResult);
-  const profile = learnerContext();
-  const out = await chat([
-    {
-      role: 'system',
-      content: `你是耐心的英语精读老师。讲解给定的英文句子，输出严格 JSON：
-{
-  "translation": "准确通顺的中文翻译",
-  "structure": "句子主干结构简单说明，如：主语 + 谓语 + that 宾语从句",
-  "breakdown": [ { "part": "原文片段", "role": "该成分的语法作用，中文说明" } ],
-  "grammar": [ { "point": "语法点名称，如 定语从句 / 虚拟语气", "explain": "结合本句用中文讲解" } ],
-  "words": [
-    { "term": "重点单词或短语（原文形式）", "phonetic": "音标或空", "pos": "词性或空",
-      "meaning": "本句中的中文释义", "example": "该单词在本句中的用法片段", "level": "核心/进阶/拓展" }
-  ],
-  "tip": "一句学习提示（可选）"
-}
-规则：
-1. 只输出 JSON，不要 Markdown。
-2. words 取 2-6 个最值得记的词或短语，level 用「核心/进阶/拓展」之一。
-3. breakdown 3-6 项，grammar 1-3 项；全部用中文说明。
-${profile ? `4. 学生画像（据此控制讲解深度与词汇取舍）：\n${profile}` : ''}
-${hint}`
-    },
-    { role: 'user', content: `句子：${sentence}\n\n上下文（可能为空）：\n${String(context).slice(0, 1500)}` }
-  ], { model: s.textModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 4000, temperature: 0.3, reasoningEffort: 'low' });
-  const p = parseLooseJSON(out);
-  return {
-    translation: String(p.translation || ''),
-    structure: String(p.structure || ''),
-    breakdown: Array.isArray(p.breakdown) ? p.breakdown : [],
-    grammar: Array.isArray(p.grammar) ? p.grammar : [],
-    words: Array.isArray(p.words) ? p.words.filter((x) => x && x.term).map((x) => ({
-      term: String(x.term).trim(), phonetic: String(x.phonetic || ''), pos: String(x.pos || ''),
-      meaning: String(x.meaning || ''), example: String(x.example || ''),
-      level: ['核心', '进阶', '拓展'].includes(x.level) ? x.level : '核心'
-    })) : [],
-    tip: String(p.tip || ''),
-    sentence: String(sentence || ''),
-    nlp: nlpResult ? {
-      engine: nlpResult.engine,
-      stats: nlpResult.stats,
-      preview: nlpResult.preview,
-      tokens: nlpResult.tokens,
-      tree: nlpResult.tree
-    } : null,
-    explainedAt: new Date().toISOString()
-  };
-}
-
 /** 单词深度解析：释义 / 词根词缀 / 搭配 / 例句 / 辨析（用于速查页 AI 补充） */
 export async function explainWord(term, context = '') {
   const s = getSettings();
@@ -636,7 +588,7 @@ export async function explainWord(term, context = '') {
     nlpResult = await nlpSentence(context.slice(0, 500));
     hint = syntaxHint(nlpResult);
   }
-  const out = await chat([
+  const p = await chatJson([
     {
       role: 'system',
       content: `你是英语词汇学老师。深度讲解一个单词或短语，输出严格 JSON：
@@ -659,7 +611,6 @@ ${hint}`
     },
     { role: 'user', content: `单词/短语：${term}\n\n语境（可能为空）：\n${String(context).slice(0, 800)}` }
   ], { model: s.textModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 4000, temperature: 0.3, reasoningEffort: 'low' });
-  const p = parseLooseJSON(out);
   return {
     term: String(p.term || term).trim(), phonetic: String(p.phonetic || ''), pos: String(p.pos || ''),
     meanings: Array.isArray(p.meanings) ? p.meanings : [],
@@ -672,15 +623,23 @@ ${hint}`
   };
 }
 
-/** 划词翻译 / 简短解释（非 JSON，快速返回） */
+/** 划词翻译 / 简短解释（非 JSON，快速返回；同内容会话级缓存，重复划词不重复请求） */
+const selCache = new Map();
 export async function translateSelection(text, context = '') {
+  const key = `${normalizeKey(text)}|${normalizeKey(String(context).slice(0, 300))}`;
+  if (selCache.has(key)) return selCache.get(key);
   const r = await nlpSentence(text);
   const hint = syntaxHint(r);
   const out = await chat([
     { role: 'system', content: `你是英汉翻译助手。给出所选英文内容的准确中文翻译；若是单词或短语，再附一行用法说明。直接输出中文，不要 Markdown，不要解释你的工作方式。${hint ? '\n\n' + hint + '\n\n翻译时请参考句法分析，确保主干和修饰关系判断正确。' : ''}` },
     { role: 'user', content: `选中内容：${text}\n\n上下文：${String(context).slice(0, 800)}` }
   ], { fallbacks: TEXT_FALLBACKS, max_tokens: 800, temperature: 0.2, reasoningEffort: 'low' });
-  return out.trim();
+  const v = out.trim();
+  if (v) {
+    if (selCache.size > 60) selCache.clear();
+    selCache.set(key, v);
+  }
+  return v;
 }
 
 function countWords(text) {

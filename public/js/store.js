@@ -325,6 +325,15 @@ export function cacheSentence(articleId, index, explanation) {
   emit(); save();
 }
 
+/** 合并更新某句缓存里的轻量数据（如精读对话轮次），不整体覆盖讲解对象 */
+export function patchSentence(articleId, index, patch) {
+  const a = getArticle(articleId);
+  if (!a) return;
+  if (!a.sentences) a.sentences = {};
+  a.sentences[index] = Object.assign({}, a.sentences[index] || {}, patch);
+  emit(); save();
+}
+
 /* ---------- 长难句讲解历史 ---------- */
 export function getSentenceHistory() { return state.sentenceHistory; }
 
