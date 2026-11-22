@@ -20,16 +20,6 @@ const dict = require('./dict');
 const mdx = require('./mdx');
 const auth = require('./auth');
 
-/**
- * 账号功能临时开关
- * - true ：暂停「注册 / 登录」，接口直接拒绝；前端免登录，自动进入首个本机账号，
- *          学习数据仍按账号文件读写，不会丢。
- * - false：恢复完整账号体系（注册 / 登录 / 退出），同时需还原 public/js/login-screen.js
- *          与 public/js/app.js 里的登录门槛。
- * 暂时关掉的是入口，账号与数据文件都还在，随时可以改回 false。
- */
-const AUTH_PAUSED = true;
-
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -206,6 +196,10 @@ function send(res, status, data, extraHeaders = {}) {
   res.end(body);
 }
 
+function unauthorized(res) {
+  send(res, 401, { ok: false, error: '请先登录' });
+}
+
 function readBody(req, limit = 16 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -231,7 +225,8 @@ function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel === '/' || rel === '/index.html') rel = '/index.html';
   const target = path.resolve(PUBLIC_DIR, `.${rel}`);
-  if (!target.startsWith(PUBLIC_DIR)) { send(res, 403, 'Forbidden'); return; }
+  // 前缀比较必须带上路径分隔符，否则 public-evil 之类同名前缀目录也能通过
+  if (target !== PUBLIC_DIR && !target.startsWith(PUBLIC_DIR + path.sep)) { send(res, 403, 'Forbidden'); return; }
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
     // SPA 回退
     const fallback = path.join(PUBLIC_DIR, 'index.html');
@@ -280,8 +275,13 @@ async function callUpstream(apiBase, apiKey, body, timeoutMs = 120000) {
 
 async function handleAI(req, res) {
   const body = await readJsonBody(req);
-  const apiKey = (req.headers['x-api-key'] || process.env.WORDWISE_API_KEY || config.apiKey || '').toString();
-  const apiBase = (req.headers['x-api-base'] || config.apiBase || '').toString();
+  const clientKey = String(req.headers['x-api-key'] || '').trim();
+  const apiKey = clientKey || String(process.env.WORDWISE_API_KEY || config.apiKey || '').trim();
+  // 只有客户端自带 Key 时才允许自定义网关；使用服务端 Key 时忽略 x-api-base，
+  // 防止把服务端保存的 Key 发往任意地址（Key 外泄 / SSRF）
+  const apiBase = clientKey
+    ? String(req.headers['x-api-base'] || config.apiBase || '')
+    : String(config.apiBase || '');
   if (!apiKey) { send(res, 400, { error: '未配置 API Key，请在设置中填写' }); return; }
   if (!body.messages || !Array.isArray(body.messages)) { send(res, 400, { error: 'messages 格式不正确' }); return; }
   const payload = {
@@ -296,8 +296,12 @@ async function handleAI(req, res) {
 }
 
 async function handleModels(req, res) {
-  const apiKey = (req.headers['x-api-key'] || process.env.WORDWISE_API_KEY || config.apiKey || '').toString();
-  const apiBase = (req.headers['x-api-base'] || config.apiBase || '').toString();
+  const clientKey = String(req.headers['x-api-key'] || '').trim();
+  const apiKey = clientKey || String(process.env.WORDWISE_API_KEY || config.apiKey || '').trim();
+  // 同 handleAI：服务端 Key 生效时不采纳客户端 x-api-base
+  const apiBase = clientKey
+    ? String(req.headers['x-api-base'] || config.apiBase || '')
+    : String(config.apiBase || '');
   if (Date.now() - modelsCache.at < 10 * 60 * 1000 && modelsCache.data && !req.headers['x-api-key']) {
     send(res, 200, modelsCache.data); return;
   }
@@ -438,16 +442,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const token = auth.tokenFrom(req);
     const sessionHit = token ? auth.findSession(token) : null;
-    let currentUser = sessionHit ? auth.publicUser(sessionHit.user) : null;
-    // 免登录模式：没有有效会话时自动落到本机账号，接口照常读写该账号的学习数据
-    if (!currentUser && AUTH_PAUSED) {
-      const local = auth.localUser();
-      if (local) currentUser = Object.assign(auth.publicUser(local), { local: true });
-    }
+    const currentUser = sessionHit ? auth.publicUser(sessionHit.user) : null;
 
     /* ---------- 账号与会话 ---------- */
     if (req.method === 'POST' && p === '/api/auth/register') {
-      if (AUTH_PAUSED) { send(res, 403, { ok: false, error: '注册功能已暂时关闭' }); return; }
       const body = await readJsonBody(req, 64 * 1024);
       try {
         const user = auth.register(body);
@@ -459,7 +457,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && p === '/api/auth/login') {
-      if (AUTH_PAUSED) { send(res, 403, { ok: false, error: '登录功能已暂时关闭' }); return; }
       const body = await readJsonBody(req, 64 * 1024);
       try {
         const user = auth.login(body);
@@ -476,7 +473,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && p === '/api/auth/me') {
-      send(res, 200, { ok: true, user: currentUser, authPaused: AUTH_PAUSED });
+      send(res, 200, { ok: true, user: currentUser });
       return;
     }
 
@@ -487,6 +484,7 @@ const server = http.createServer(async (req, res) => {
 
     // 局域网访问信息：地址、端口、是否已对内网开放
     if (req.method === 'GET' && p === '/api/net') {
+      if (!currentUser) { unauthorized(res); return; }
       const addresses = LAN_ENABLED ? lanAddresses() : [];
       send(res, 200, {
         ok: true,
@@ -514,12 +512,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    /* ---------- MDX / MDD 词典（用户导入） ---------- */
+    /* ---------- MDX / MDD 词典（用户导入，需登录） ---------- */
     if (req.method === 'GET' && p === '/api/mdx/status') {
+      if (!currentUser) { unauthorized(res); return; }
       send(res, 200, { ok: true, dicts: mdx.listDicts(), available: mdx.mdictAvailable() });
       return;
     }
     if (req.method === 'GET' && p === '/api/mdx/lookup') {
+      if (!currentUser) { unauthorized(res); return; }
       const q = String(url.searchParams.get('q') || '').slice(0, 80);
       const hit = mdx.lookup(q);
       if (!hit) { send(res, 200, { ok: false, term: q, suggestions: mdx.suggest(q) }); return; }
@@ -527,10 +527,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && p === '/api/mdx/suggest') {
+      if (!currentUser) { unauthorized(res); return; }
       send(res, 200, { ok: true, list: mdx.suggest(String(url.searchParams.get('q') || '').slice(0, 40)) });
       return;
     }
     if (req.method === 'POST' && p === '/api/mdx/upload') {
+      if (!currentUser) { unauthorized(res); return; }
       const kind = String(url.searchParams.get('kind') || 'mdx').toLowerCase();
       if (kind !== 'mdx' && kind !== 'mdd') { send(res, 400, { error: '只支持 .mdx / .mdd 文件' }); return; }
       let token = String(url.searchParams.get('token') || '');
@@ -550,6 +552,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && p === '/api/mdx/import') {
+      if (!currentUser) { unauthorized(res); return; }
       const body = await readJsonBody(req, 1024 * 1024);
       const token = String(body.token || '');
       const name = String(body.name || '').slice(0, 120);
@@ -562,12 +565,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && p === '/api/mdx/delete') {
+      if (!currentUser) { unauthorized(res); return; }
       const body = await readJsonBody(req, 64 * 1024);
       const ok = mdx.removeDict(body.id);
       send(res, 200, { ok });
       return;
     }
     if (req.method === 'GET' && p.startsWith('/api/mdx/res/')) {
+      if (!currentUser) { unauthorized(res); return; }
       const rest = p.slice('/api/mdx/res/'.length);
       const slash = rest.indexOf('/');
       const id = slash < 0 ? rest : rest.slice(0, slash);
@@ -633,6 +638,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && p === '/api/config') {
+      if (!currentUser) { unauthorized(res); return; }
       const body = await readJsonBody(req);
       const allowed = ['apiBase', 'apiKey', 'textModel', 'visionModel', 'gradingModel', 'dailyQuestionCount', 'reminderTime'];
       allowed.forEach((k) => { if (body[k] !== undefined) config[k] = body[k]; });
@@ -642,8 +648,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'GET' && p === '/api/models') { await handleModels(req, res); return; }
-    if (req.method === 'POST' && p === '/api/ai') { await handleAI(req, res); return; }
+    if (req.method === 'GET' && p === '/api/models') { if (!currentUser) { unauthorized(res); return; } await handleModels(req, res); return; }
+    if (req.method === 'POST' && p === '/api/ai') { if (!currentUser) { unauthorized(res); return; } await handleAI(req, res); return; }
 
     if (req.method === 'GET' && p === '/api/data') {
       if (!currentUser) { send(res, 401, { ok: false, error: '请先登录' }); return; }
@@ -675,6 +681,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && p.startsWith('/api/image/')) {
+      if (!currentUser) { unauthorized(res); return; }
       const name = path.basename(p);
       const target = path.join(UPLOAD_DIR, name);
       if (!fs.existsSync(target)) { send(res, 404, 'Not found'); return; }

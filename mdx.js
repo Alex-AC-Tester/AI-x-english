@@ -275,15 +275,22 @@ function splitHeadBody(html) {
   return { head: head.trim(), body: body.trim() };
 }
 
-/** 去掉会干扰渲染或引发跳转的内容（脚本 / meta / 音频与内部链接） */
+/**
+ * 去掉会干扰渲染或引发跳转的内容（脚本 / meta / 嵌入框架 / 事件属性 / js 链接）。
+ * 词典 HTML 是第三方不可信输入；前端 iframe 沙箱（mdx 渲染处）永远不要加 allow-scripts。
+ */
 function sanitize(html) {
   return String(html || '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<meta\b[^>]*>/gi, '')
+    .replace(/<(iframe|object|embed)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(iframe|object|embed)\b[^>]*>/gi, '')
     .replace(/\shref\s*=\s*("|')sound:\/\/[^"']*\1/gi, '')
     .replace(/\shref\s*=\s*("|')entry:\/\/([^"']*)\1/gi, ' data-entry="$2"')
-    .replace(/\shref\s*=\s*("|')javascript:[^"']*\1/gi, '')
-    .replace(/\son\w+\s*=\s*("|')[^"']*\1/gi, '');
+    .replace(/\shref\s*=\s*("|')\s*javascript\s*:[^"']*\1/gi, '')
+    .replace(/\shref\s*=\s*javascript\s*:[^\s>]*/gi, '')
+    .replace(/\son\w+\s*=\s*("|')[^"']*\1/gi, '')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '');
 }
 
 function packHit(entry, hit, term) {

@@ -29,3 +29,7 @@ config.json
 .trash/
 exec-approvals.json
 ps-exe.txt
+
+# Python 编译产物
+__pycache__/
+*.pyc

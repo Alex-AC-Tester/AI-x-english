@@ -1,5 +1,6 @@
 import { init, subscribe, onSync, getState, setSettings, getSettings } from './store.js';
 import { fetchMe, getUser } from './auth.js';
+import { showLogin } from './login-screen.js';
 import { speak as speakText, speakSequence, splitForSpeech, stop as stopSpeaking, ttsAvailable } from './tts.js';
 import { isNative } from './bridge.js';
 import { computeStats } from './stats.js';
@@ -157,14 +158,17 @@ async function boot() {
     await startApp({ id: 'local', username: '本机', nickname: '本机用户', local: true });
     return;
   }
-  // 账号功能已暂时关闭：不再弹登录 / 注册，直接进入本机账号
+
+  // 会话在使用中失效（过期 / 服务端清理）：切回登录屏，登录后重新进入
+  window.addEventListener('ww:unauthorized', () => {
+    stopSpeaking();
+    showLogin((user) => startApp(user));
+  });
+
+  // 未登录 → 登录屏；服务不可达 → 错误提示（与未登录区分开）
   const me = await fetchMe();
   if (!me) {
-    document.getElementById('view').innerHTML = `
-      <div class="card">
-        <h2>未找到本机账号</h2>
-        <p class="small muted">账号功能已暂时关闭，免登录直接使用本机数据。但服务端没有可用账号，请检查 data/users.json，或把 server.js 里的 AUTH_PAUSED 改回 false 恢复登录。</p>
-      </div>`;
+    showLogin((user) => startApp(user));
     return;
   }
   await startApp(me);
@@ -212,5 +216,5 @@ async function startApp(me) {
 
 boot().catch((err) => {
   console.error(err);
-  document.getElementById('view').innerHTML = `<div class="card"><h2>启动失败</h2><p class="small muted">${err.message}</p></div>`;
+  document.getElementById('view').innerHTML = `<div class="card"><h2>无法连接服务</h2><p class="small muted">${escapeHTML(err.message)}</p><button class="btn btn-primary" onclick="location.reload()">重试</button></div>`;
 });

@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # 不加 CORS 头：本服务只面向本机 Node 代理（同源转发），浏览器无需跨域访问
         self.end_headers()
         self.wfile.write(body)
 

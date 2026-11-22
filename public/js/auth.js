@@ -1,26 +1,44 @@
-// 账号状态（浏览器端）：注册 / 登录 / 退出已暂时关闭，只保留读取当前本机账号。
-// 恢复账号功能时，把 /api/auth/login、/api/auth/register 的调用与登录界面一起加回来。
+// 账号状态（浏览器端）：登录 / 注册 / 退出 + 当前用户缓存。
+// 请求统一走 api.js（超时、401 事件派发都在那里处理）。
+
+import { request } from './api.js';
 
 let currentUser = null;
 
-async function req(path, options = {}) {
-  const res = await fetch(path, Object.assign({ cache: 'no-store' }, options));
-  let data = null;
-  try { data = await res.json(); } catch (_) { data = null; }
-  if (!res.ok || (data && data.ok === false)) {
-    throw new Error((data && data.error) || `请求失败（HTTP ${res.status}）`);
-  }
-  return data || {};
-}
-
 export async function fetchMe() {
-  try {
-    const data = await req('/api/auth/me');
-    currentUser = data.user || null;
-  } catch (_) {
-    currentUser = null;
-  }
+  // 服务可达但未登录时 /api/auth/me 返回 { ok:true, user:null } —— 正常返回 null；
+  // 网络不通时向上抛错，由调用方区分「离线」与「未登录」两种界面。
+  const data = await request('/api/auth/me');
+  currentUser = data.user || null;
   return currentUser;
 }
 
 export function getUser() { return currentUser; }
+
+export async function login(username, password) {
+  const data = await request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  currentUser = data.user || null;
+  return currentUser;
+}
+
+export async function register(username, password, nickname) {
+  const data = await request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, nickname })
+  });
+  currentUser = data.user || null;
+  return currentUser;
+}
+
+export async function logout() {
+  try {
+    await request('/api/auth/logout', { method: 'POST' });
+  } finally {
+    currentUser = null;
+  }
+}
