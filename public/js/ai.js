@@ -5,6 +5,8 @@ import { parseLooseJSON } from './ui.js';
 import { isNative, apiCredentials, nativeAIRequest } from './bridge.js';
 import { nlpSentence, nlpArticle, syntaxHint } from './nlp.js';
 import { profilePrompt } from './profile.js';
+import { anchorItems } from './anchor.js';
+import { crossCheckAnalysis } from './nlpcross.js';
 
 /** 取当前学习画像摘要；取不到时返回空串，不影响调用 */
 function learnerContext() {
@@ -373,8 +375,15 @@ ${hint ? `补充：${hint}` : ''}` },
   };
 }
 
-/** 全文阅读分析：概览 / 结构 / 重点词汇 / 难句 / 写作亮点 */
-export async function analyzeArticle(title, text) {
+/**
+ * 全文阅读分析：概览 / 结构 / 重点词汇 / 难句 / 写作亮点。
+ * @param {string} title 文章标题
+ * @param {string} text 正文
+ * @param {{index:number,text:string}[]|null} sentences 阅读器分句结果（带全文序号）；
+ *        提供后对 AI 返回的 keyWords/hardSentences 逐条做「定位回原文」锚定，
+ *        未在原文中命中的条目标 anchor.anchored=false，由 UI 诚实呈现。
+ */
+export async function analyzeArticle(title, text, sentences = null) {
   const s = getSettings();
   // 先做全文句法概览，作为 LLM 分析的参考骨架
   const nlpResult = await nlpArticle(text, 80);
@@ -404,14 +413,16 @@ ${hint}`
     { role: 'user', content: `标题：${title || '(无标题)'}\n\n正文：\n${String(text).slice(0, 15000)}` }
   ], { model: s.textModel, fallbacks: TEXT_FALLBACKS, json: true, max_tokens: 6000, temperature: 0.35, reasoningEffort: 'low' });
   const p = parseLooseJSON(out);
+  const sents = Array.isArray(sentences) && sentences.length ? sentences : null;
   return {
     summary: String(p.summary || ''), theme: String(p.theme || ''),
     level: String(p.level || '高中'), wordCount: Number(p.wordCount) || countWords(text),
     structure: Array.isArray(p.structure) ? p.structure : [],
-    keyWords: Array.isArray(p.keyWords) ? p.keyWords.filter((x) => x && x.term) : [],
-    hardSentences: Array.isArray(p.hardSentences) ? p.hardSentences.filter((x) => x && x.text) : [],
+    keyWords: anchorItems(Array.isArray(p.keyWords) ? p.keyWords.filter((x) => x && x.term) : [], sents || []),
+    hardSentences: anchorItems(Array.isArray(p.hardSentences) ? p.hardSentences.filter((x) => x && x.text) : [], sents || []),
     highlights: Array.isArray(p.highlights) ? p.highlights.map(String) : [],
     quiz: Array.isArray(p.quiz) ? p.quiz : [],
+    anchored: !!sents,
     nlp: nlpResult ? { engine: nlpResult.engine, totalSentences: nlpResult.totalSentences, analyzed: nlpResult.analyzed } : null,
     analyzedAt: new Date().toISOString()
   };
@@ -461,7 +472,7 @@ const COACH_SYSTEM = `你是一位很有耐心的英语精读老师，正在和�
 
 function normalizeAnalysis(p, sentence, nlpResult) {
   if (!p || typeof p !== 'object' || !String(p.translation || '').trim()) return null;
-  return {
+  const out = {
     translation: String(p.translation || ''),
     structure: String(p.structure || ''),
     breakdown: Array.isArray(p.breakdown) ? p.breakdown : [],
@@ -482,6 +493,10 @@ function normalizeAnalysis(p, sentence, nlpResult) {
     } : null,
     explainedAt: new Date().toISOString()
   };
+  // AI↔NLP 交叉校验：README「不一致时以句法结果为准」的代码级落点——
+  // 冲突不改写 AI 文本，由 UI 并排展示并标明采信 NLP
+  out.consistency = crossCheckAnalysis(out, nlpResult);
+  return out;
 }
 
 /**

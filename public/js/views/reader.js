@@ -422,11 +422,26 @@ function renderCoachAnalysis(c) {
         </div>
       </div>`).join('')}
     </div>` : ''}
-    ${e.nlp ? `<div class="feedback mt12" style="border-left:3px solid var(--success)">
-      ${icon('check', 13)} <strong>句法已校准</strong> · ${esc(e.nlp.engine)} 本地分析
-      <span class="tiny muted">（${esc(e.nlp.stats?.sentenceType || '')} · ${esc(e.nlp.stats?.complexity || '')} · ${e.nlp.stats?.clauses || 0} 处从句结构）</span>
-      <button class="btn btn-sm btn-ghost" data-action="showSyntax" style="margin-left:6px">查看句法骨架</button>
-    </div>` : ''}
+    ${e.nlp ? (() => {
+      // AI↔NLP 交叉校验结论：一致 → 绿色徽章；冲突 → 红色并可展开详情（冲突处采信 NLP）
+      const c = e.consistency || { verdict: 'unknown', conflicts: [] };
+      const FIELD_LABEL = { root: '主干动词', passive: '被动语态', question: '疑问句' };
+      const conflict = c.verdict === 'conflict';
+      const detail = conflict ? `
+        <details class="nlp-conflict" style="margin-top:6px">
+          <summary style="color:var(--danger);cursor:pointer">不一致 ${c.conflicts.length} 处，点击查看（按约定此处采信本地句法）</summary>
+          ${c.conflicts.map((cf) => `<div class="small" style="margin:6px 0 0 12px">
+            <b>${esc(FIELD_LABEL[cf.field] || cf.field)}</b>：
+            采信 NLP <b style="color:var(--success)">${esc(cf.nlp)}</b>
+            <span class="tiny muted">（AI 讲解为「${esc(cf.ai)}」）</span></div>`).join('')}
+        </details>` : '';
+      return `<div class="feedback mt12" style="border-left:3px solid ${conflict ? 'var(--danger)' : 'var(--success)'}">
+        ${icon(conflict ? 'info' : 'check', 13)} <strong>${conflict ? '句法交叉校验发现分歧' : '句法已校准'}</strong> · ${esc(e.nlp.engine)} 本地分析
+        <span class="tiny muted">（${esc(e.nlp.stats?.sentenceType || '')} · ${esc(e.nlp.stats?.complexity || '')} · ${e.nlp.stats?.clauses || 0} 处从句结构）</span>
+        <button class="btn btn-sm btn-ghost" data-action="showSyntax" style="margin-left:6px">查看句法骨架</button>
+        ${detail}
+      </div>`;
+    })() : ''}
     ${e.tip ? `<div class="feedback mt12">${icon('info', 13)} ${esc(e.tip)}</div>` : ''}
     <div class="row mt16">
       <button class="btn btn-sm btn-ghost" data-action="coachRestart">${icon('refresh', 13)} 再练一次这句</button>
@@ -435,19 +450,28 @@ function renderCoachAnalysis(c) {
 }
 
 function renderAnalysis(an) {
+  const kw = an.keyWords || [];
+  const hs = an.hardSentences || [];
+  const kwHit = kw.filter((k) => k.anchor?.anchored).length;
+  const hsHit = hs.filter((s) => s.anchor?.anchored).length;
+  /** 锚点控件：已定位 → 跳原句按钮；未定位 → 灰色诚实徽章；旧缓存无 anchor 字段 → 不渲染 */
+  const anchorCtl = (it) => it.anchor?.anchored
+    ? `<button class="anchor-go" type="button" data-action="jumpSentence" data-si="${it.anchor.sentenceIndex}" title="在原文中定位">${icon('reader', 12)}</button>`
+    : (it.anchor ? `<span class="anchor-miss" title="这条 AI 返回在原文中匹配不到，可能是改写或杜撰">未定位</span>` : '');
   return `
     <section class="card mt16">
-      <div class="card-head"><div><h2>全文分析</h2><div class="sub">${esc(an.level || '高中')} · ${an.wordCount || 0} 词</div></div>${icon('chart', 18)}</div>
+      <div class="card-head"><div><h2>全文分析</h2><div class="sub">${esc(an.level || '高中')} · ${an.wordCount || 0} 词${an.anchored ? ' · 定位回原文已启用' : ''}</div></div>${icon('chart', 18)}</div>
       ${an.theme ? `<div class="analysis-block"><h4>主旨</h4><p>${esc(an.theme)}</p></div>` : ''}
       ${an.summary ? `<div class="analysis-block"><h4>内容概要</h4><p>${esc(an.summary)}</p></div>` : ''}
       ${an.structure?.length ? `<div class="analysis-block"><h4>篇章结构</h4>
         ${an.structure.map((s) => `<div class="small" style="margin:6px 0"><b>${esc(s.part)}</b> ${esc(s.gist)}<span class="tiny muted"> · ${esc(s.role)}</span></div>`).join('')}</div>` : ''}
-      ${an.keyWords?.length ? `<div class="analysis-block"><h4>重点词汇（点击讲解并入库）</h4>
-        ${an.keyWords.map((k, i) => `<span class="kw-chip" data-action="analysisWord" data-i="${i}">
-          <b>${esc(k.term)}</b><span class="kw-mean">${esc(k.meaning)}</span><button class="tts-btn" type="button" data-speak="${esc(k.term)}" title="听发音" aria-label="听 ${esc(k.term)}">${icon('volume', 12)}</button></span>`).join('')}</div>` : ''}
-      ${an.hardSentences?.length ? `<div class="analysis-block"><h4>长难句 · 点开逐句精读</h4>
-        ${an.hardSentences.map((s) => `<div class="hard-sentence">
-          <div class="hs-text">${esc(s.text)}</div>
+      ${kw.length ? `<div class="analysis-block"><h4>重点词汇（点击讲解并入库 · 已定位 ${kwHit}/${kw.length}）</h4>
+        ${kw.map((k, i) => `<span class="kw-chip" data-action="analysisWord" data-i="${i}">
+          <b>${esc(k.term)}</b><span class="kw-mean">${esc(k.meaning)}</span>${anchorCtl(k)}<button class="tts-btn" type="button" data-speak="${esc(k.term)}" title="听发音" aria-label="听 ${esc(k.term)}">${icon('volume', 12)}</button></span>`).join('')}</div>` : ''}
+      ${hs.length ? `<div class="analysis-block"><h4>长难句（AI 判定 · 正文紫线为本地 NLP 判定）</h4>
+        <div class="tiny muted" style="margin-bottom:8px">已定位 ${hsHit}/${hs.length}；「未定位」条目可能是 AI 改写或杜撰，谨慎参考</div>
+        ${hs.map((s) => `<div class="hard-sentence">
+          <div class="hs-text">${esc(s.text)} ${anchorCtl(s)}</div>
           <div class="tiny muted">${esc(s.reason)}</div>
           <div class="row" style="gap:6px">
             <button class="btn btn-sm btn-ghost" data-action="coachHard" data-text="${esc(s.text)}">${icon('highlighter', 12)} 我自己翻这句</button>
@@ -550,6 +574,15 @@ function scrollCoachIntoView(force = false) {
   // 桌面端：面板就在正文旁边，除非它已经滚出可视区，否则不打断阅读
   if (!force && window.innerWidth > 1040 && top >= 0 && top < window.innerHeight - 160) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/** 定位回原文：滚动到指定句子并短暂高亮（全文分析卡的重点词/难句跳转用） */
+function jumpToSentence(si) {
+  const el = document.querySelector(`#articlePaper .sentence[data-si="${si}"]`);
+  if (!el) { toast('没有找到对应的句子', 'error'); return; }
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('anchor-flash');
+  setTimeout(() => el.classList.remove('anchor-flash'), 2200);
 }
 
 /** 打开某一句的精读对话：先让学生自己翻，AI 只引导 */
@@ -767,6 +800,7 @@ export function mount() {
     if (a === 'newImport') { collectImport(); showImport = true; refreshMe(); return; }
     if (a === 'goHistory') { go('history'); return; }
     if (a === 'hardItem') { openCoach(Number(btn.dataset.i)); return; }
+    if (a === 'jumpSentence') { jumpToSentence(Number(btn.dataset.si)); return; }
     if (a === 'backtrans') {
       const art = getArticle(currentId);
       const i = Number(btn.dataset.i);
@@ -977,9 +1011,12 @@ export function mount() {
       const art = getArticle(currentId);
       analysisBusy = true; refreshMe();
       try {
-        const an = await analyzeArticle(art.title, art.text);
+        // 把阅读器分句传给 AI 分析：AI 返回的重点词/长难句会逐条定位回原文（anchor）
+        const sentences = flattenSentences(splitArticle(art.text)).map((text, index) => ({ index, text }));
+        const an = await analyzeArticle(art.title, art.text, sentences);
         patchArticle(art.id, { analysis: an });
-        toast('全文分析已生成', 'success');
+        const stats = an.hardSentences.filter((x) => x.anchor?.anchored).length;
+        toast(`全文分析已生成 · 难句定位 ${stats}/${an.hardSentences.length}`, 'success');
       } catch (err) { toast(`分析失败：${err.message}`, 'error', 5000); }
       analysisBusy = false; refreshMe();
       return;
