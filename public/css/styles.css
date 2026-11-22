@@ -2006,3 +2006,11 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--primary); }
 @media (max-width: 720px) {
   .card-head { flex-wrap: wrap; }
 }
+/* 今天页：移动端分屏骨架堆叠为单列长菜单（此前 .home-main 无任何堆叠规则） */
+@media (max-width: 720px) {
+  .home-main { grid-template-columns: minmax(0, 1fr); }
+  /* 四格统计条改为 2×2，避免 390px 下每格不足百像素 */
+  .ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ledger > div { border-left: 0; border-top: 1px solid var(--border); }
+  .ledger > div:nth-child(-n+2) { border-top: 0; }
+}
