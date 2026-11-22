@@ -269,7 +269,12 @@ class Handler(BaseHTTPRequestHandler):
                 text = str(body.get("text") or "").strip()
                 if not text:
                     self._send(400, {"ok": False, "error": "缺少 text"}); return
-                self._send(200, analyze_text(text, max_sentences=int(body.get("maxSentences", 80))))
+                try:
+                    max_sentences = int(body.get("maxSentences", 80))
+                except (TypeError, ValueError):
+                    max_sentences = 80
+                max_sentences = max(1, min(200, max_sentences))
+                self._send(200, analyze_text(text, max_sentences=max_sentences))
             else:
                 self._send(404, {"ok": False, "error": "not found"})
         except Exception as e:

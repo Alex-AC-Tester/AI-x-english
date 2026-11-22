@@ -1,9 +1,13 @@
-const CACHE = 'wordwise-v18';
+const CACHE = 'wordwise-v19';
+// 预缓存清单必须覆盖 public/js 下所有实际存在的模块（含视图静态 import 的依赖），
+// 否则新装设备离线冷启动时对应功能直接挂掉。新增 JS 模块后务必同步这里并 bump CACHE。
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './icons/icon.svg', './css/styles.css',
-  './js/app.js', './js/ai.js', './js/bridge.js', './js/dict.js', './js/mdx.js', './js/gaokao.js',
+  './js/app.js', './js/api.js', './js/login-screen.js', './js/ai.js', './js/bridge.js',
+  './js/auth.js', './js/dict.js', './js/mdx.js', './js/gaokao.js',
   './js/ebook.js', './js/tts.js',
   './js/reminder.js', './js/router.js', './js/srs.js',
+  './js/backtrans.js', './js/hardsent.js', './js/nlp.js', './js/structtree.js',
   './js/stats.js', './js/store.js', './js/ui.js', './js/viz.js',
   './js/views/home.js', './js/views/import.js', './js/views/words.js', './js/views/learn.js',
   './js/views/reader.js', './js/views/history.js', './js/views/lookup.js',
@@ -13,7 +17,10 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()).catch(() => {}));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()).catch((err) => {
+    // 预缓存任一资源失败都会让整个 install 失败、PWA 失去离线能力——必须留下可查日志
+    console.error('[sw] 预缓存失败，离线能力不可用:', err);
+  }));
 });
 
 self.addEventListener('activate', (e) => {
@@ -79,7 +86,12 @@ self.addEventListener('notificationclick', (e) => {
   const target = e.notification.data?.url || '#/home';
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
     for (const client of list) {
-      if ('focus' in client) { client.focus(); client.navigate(target); return; }
+      if ('focus' in client) {
+        client.focus();
+        // hash 深链必须以站点根为基准解析，直接 navigate(target) 会相对 sw.js 解析成 /sw.js#/...
+        client.navigate(`/${target}`).catch(() => client.navigate('/'));
+        return;
+      }
     }
     return clients.openWindow(`/${target}`);
   }));

@@ -6,6 +6,5 @@
   "textModel": "",
   "visionModel": "",
   "gradingModel": "",
-  "dailyQuestionCount": 10,
-  "reminderTime": "20:00"
+  "dailyQuestionCount": 10
 }

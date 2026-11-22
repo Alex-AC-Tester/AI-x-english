@@ -86,8 +86,7 @@ const DEFAULT_CONFIG = {
   textModel: '',
   visionModel: '',
   gradingModel: '',
-  dailyQuestionCount: 10,
-  reminderTime: '20:00'
+  dailyQuestionCount: 10
 };
 config = Object.assign({}, DEFAULT_CONFIG, config);
 
@@ -103,9 +102,6 @@ function validateConfigPatch(body) {
   if (body.dailyQuestionCount !== undefined) {
     const n = Number(body.dailyQuestionCount);
     if (!Number.isInteger(n) || n < 1 || n > 100) return 'dailyQuestionCount 需为 1-100 的整数';
-  }
-  if (body.reminderTime !== undefined && String(body.reminderTime).trim() !== '') {
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(body.reminderTime).trim())) return 'reminderTime 需为 HH:MM（24 小时制）';
   }
   return null;
 }
@@ -430,7 +426,8 @@ function startReminderScheduler() {
   setInterval(async () => {
     const subs = loadSubs();
     if (!subs.length) return;
-    let changed = false;
+    const sent = new Map();   // endpoint → 日期（本轮发送成功，需记录 lastSentDate）
+    const gone = new Set();   // 上游返回 410 的失效订阅，写回时移除
     for (const sub of subs) {
       const s = sub.settings || {};
       if (!s.enabled) continue;
@@ -439,12 +436,18 @@ function startReminderScheduler() {
       if (nowHM !== (s.time || '20:00')) continue;
       if (sub.lastSentDate === today) continue;
       const r = await sendPush(sub);
-      if (r.ok || r.status === 201 || String(r.error || '').includes('410')) {
-        sub.lastSentDate = today;
-        changed = true;
-      }
+      if (r.status === 410) { gone.add(sub.endpoint); continue; }  // 订阅已失效，移除
+      if (r.ok) sent.set(sub.endpoint, today);
     }
-    if (changed) saveSubs(subs);
+    if (!sent.size && !gone.size) return;
+    // 写回前重读最新订阅列表，只合并本轮改动——避免覆盖发送期间新增/删除的订阅
+    const fresh = loadSubs().filter((s) => !gone.has(s.endpoint));
+    let changed = gone.size > 0;
+    for (const s of fresh) {
+      const d = sent.get(s.endpoint);
+      if (d && s.lastSentDate !== d) { s.lastSentDate = d; changed = true; }
+    }
+    if (changed) saveSubs(fresh);
   }, 30000);
 }
 
@@ -638,6 +641,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, result);
       return;
     }
+    // （maxSentences 的夹取在 nlp-client.analyzeText 内完成：1-200，异常值回退 80）
 
     if (req.method === 'GET' && p === '/api/config') {
       send(res, 200, {
@@ -646,8 +650,7 @@ const server = http.createServer(async (req, res) => {
         textModel: config.textModel,
         visionModel: config.visionModel,
         gradingModel: config.gradingModel,
-        dailyQuestionCount: config.dailyQuestionCount,
-        reminderTime: config.reminderTime
+        dailyQuestionCount: config.dailyQuestionCount
       });
       return;
     }
@@ -657,7 +660,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const invalid = validateConfigPatch(body);
       if (invalid) { send(res, 400, { ok: false, error: invalid }); return; }
-      const allowed = ['apiBase', 'apiKey', 'textModel', 'visionModel', 'gradingModel', 'dailyQuestionCount', 'reminderTime'];
+      const allowed = ['apiBase', 'apiKey', 'textModel', 'visionModel', 'gradingModel', 'dailyQuestionCount'];
       allowed.forEach((k) => {
         if (body[k] === undefined) return;
         config[k] = typeof body[k] === 'number' ? body[k] : String(body[k] == null ? '' : body[k]).trim();
